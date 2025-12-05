@@ -1,0 +1,207 @@
+open Rresult
+
+let teztnets_url = "https://teztnets.com/teztnets.json"
+
+let fetch_json () : (string, [> R.msg]) result =
+  let open Lwt.Infix in
+  try
+    Lwt_main.run
+      (let uri = Uri.of_string teztnets_url in
+       Cohttp_lwt_unix.Client.get uri >>= fun (resp, body) ->
+       let status = Cohttp.Response.status resp in
+       if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
+         Cohttp_lwt.Body.to_string body >|= fun body ->
+         if String.trim body = "" then
+           R.error_msg "Empty teztnets.json response"
+         else Ok body
+       else
+         let code = Cohttp.Code.code_of_status status in
+         let msg =
+           Format.asprintf "HTTP %d while fetching %s" code teztnets_url
+         in
+         Lwt.return (R.error_msg msg))
+  with exn ->
+    R.error_msgf "Failed to fetch teztnets.json: %s" (Printexc.to_string exn)
+
+type network_info = {
+  alias : string;
+  network_url : string;
+  human_name : string option;
+  description : string option;
+  faucet_url : string option;
+  rpc_url : string option;
+  docker_build : string option;
+  git_ref : string option;
+  last_updated : string option;
+  category : string option;
+}
+
+let pick_string (klist : string list) (obj : Yojson.Safe.t) : string option =
+  let open Yojson.Safe.Util in
+  let rec loop ks =
+    match ks with
+    | [] -> None
+    | k :: ks -> (
+        match member k obj with
+        | `String s when s <> "" -> Some s
+        | _ -> loop ks)
+  in
+  loop klist
+
+let parse_networks (json_s : string) : (network_info list, [> R.msg]) result =
+  try
+    let open Yojson.Safe in
+    let json = from_string json_s in
+    let items : Yojson.Safe.t list =
+      match json with
+      | `List lst -> lst
+      | `Assoc kvs -> (
+          match
+            List.find_opt
+              (fun (k, v) ->
+                match v with
+                | `List _ ->
+                    List.mem
+                      k
+                      [
+                        "nets"; "networks"; "items"; "chains"; "teztnets"; "data";
+                      ]
+                | _ -> false)
+              kvs
+          with
+          | Some (_k, `List lst) -> lst
+          | _ ->
+              List.filter_map
+                (fun (_k, v) -> match v with `Assoc _ -> Some v | _ -> None)
+                kvs)
+      | _ -> []
+    in
+    let to_info it =
+      let human_name =
+        pick_string
+          ["humanName"; "human_name"; "name"; "chainName"; "chain_name"; "id"]
+          it
+      in
+      let slug =
+        match pick_string ["slug"; "id"; "name"] it with
+        | Some s -> s
+        | None -> Option.value ~default:"unknown" human_name
+      in
+      let network_url =
+        pick_string
+          [
+            "networkJsonUrl";
+            "network_json_url";
+            "networkJson";
+            "network_json";
+            "configURL";
+            "config_url";
+            "networkURL";
+            "network_url";
+            "networkConfigURL";
+            "network_config_url";
+            "chainJSONURL";
+            "chain_json_url";
+            "json";
+          ]
+          it
+      in
+      let is_mn s =
+        let s = String.lowercase_ascii s in
+        s = "mainnet" || s = "ghostnet"
+      in
+      let final_url =
+        match (slug, human_name, network_url) with
+        | s, _, _ when is_mn s -> String.lowercase_ascii s
+        | _, Some l, _ when is_mn l -> String.lowercase_ascii l
+        | _, _, Some u -> u
+        | _ -> ""
+      in
+      if final_url = "" then None
+      else
+        Some
+          {
+            alias = slug;
+            network_url = final_url;
+            human_name;
+            description = pick_string ["description"; "desc"] it;
+            faucet_url = pick_string ["faucetUrl"; "faucet_url"; "faucet"] it;
+            rpc_url = pick_string ["rpcUrl"; "rpc_url"; "rpc"] it;
+            docker_build = pick_string ["dockerBuild"; "docker_build"] it;
+            git_ref = pick_string ["gitRef"; "git_ref"; "branch"; "tag"] it;
+            last_updated = pick_string ["lastUpdated"; "last_updated"] it;
+            category = pick_string ["category"; "type"] it;
+          }
+    in
+    let infos = items |> List.filter_map to_info in
+    match infos with
+    | [] -> R.error_msg "No networks found in teztnets.json"
+    | _ -> Ok infos
+  with exn ->
+    R.error_msgf "Failed to parse teztnets.json: %s" (Printexc.to_string exn)
+
+let fallback_networks =
+  [
+    {
+      alias = "mainnet";
+      network_url = "mainnet";
+      human_name = Some "Tezos Mainnet";
+      description = Some "The main Tezos network";
+      faucet_url = None;
+      rpc_url = Some "https://mainnet.ecadinfra.com";
+      docker_build = None;
+      git_ref = None;
+      last_updated = None;
+      category = Some "Protocol";
+    };
+    {
+      alias = "ghostnet";
+      network_url = "ghostnet";
+      human_name = Some "Ghostnet";
+      description = Some "Long-running testnet";
+      faucet_url = Some "https://faucet.ghostnet.teztnets.com";
+      rpc_url = Some "https://rpc.ghostnet.teztnets.com";
+      docker_build = None;
+      git_ref = None;
+      last_updated = None;
+      category = Some "Testnet";
+    };
+    {
+      alias = "seoulnet";
+      network_url = "seoulnet";
+      human_name = Some "Seoulnet";
+      description = Some "Testnet for Seoul protocol";
+      faucet_url = Some "https://faucet.seoulnet.teztnets.com";
+      rpc_url = Some "https://rpc.seoulnet.teztnets.com";
+      docker_build = None;
+      git_ref = None;
+      last_updated = None;
+      category = Some "Testnet";
+    };
+    {
+      alias = "weeklynet";
+      network_url = "weeklynet";
+      human_name = Some "Weeklynet";
+      description = Some "Weekly ephemeral testnet";
+      faucet_url = None;
+      rpc_url = None;
+      docker_build = None;
+      git_ref = None;
+      last_updated = None;
+      category = Some "Testnet";
+    };
+  ]
+
+let list_networks ?(fetch = fetch_json) () :
+    (network_info list, [> R.msg]) result =
+  match fetch () with
+  | Ok s -> (
+      match parse_networks s with
+      | Ok infos when infos <> [] -> Ok infos
+      | _ -> Ok fallback_networks)
+  | Error _ -> Ok fallback_networks
+
+let fallback_pairs =
+  List.map
+    (fun n -> (Option.value ~default:n.alias n.human_name, n.network_url))
+    fallback_networks

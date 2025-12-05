@@ -1,0 +1,31 @@
+(library
+ (name octez_manager_lib)
+ (public_name octez-manager.lib)
+ (modules
+  common
+  history_mode
+  system_user
+  logging_mode
+  node_env
+  systemd
+  service
+  service_registry
+  installer
+  teztnets
+  snapshots
+  settings
+  service_backend
+  installer_types
+  manager_interfaces
+  capabilities)
+ (libraries rresult yojson bos cohttp-lwt-unix uri lwt.unix miaou)
+ (instrumentation
+  (backend bisect_ppx)))
+
+(executable
+ (name main)
+ (public_name octez-manager)
+ (modules main)
+ (libraries octez_manager_lib octez-manager.ui cmdliner rresult yojson)
+ (instrumentation
+  (backend bisect_ppx)))
