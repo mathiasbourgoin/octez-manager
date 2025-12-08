@@ -5,10 +5,7 @@ open Octez_manager_lib
 
 let name = "installers"
 
-type state = {
-  services : Service.t list;
-  selected : int;
-}
+type state = {services : Service.t list; selected : int}
 
 type msg = unit
 

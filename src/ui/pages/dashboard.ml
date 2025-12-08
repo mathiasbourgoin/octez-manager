@@ -105,9 +105,7 @@ module Page : Miaou.Core.Tui_page.PAGE_SIG = struct
   let refresh s =
     let now = Unix.gettimeofday () in
     let next_page =
-      match Context.consume_navigation () with
-      | Some p -> Some p
-      | None -> None
+      match Context.consume_navigation () with Some p -> Some p | None -> None
     in
     if now -. s.last_updated > 5. then
       let summary, services = load () in

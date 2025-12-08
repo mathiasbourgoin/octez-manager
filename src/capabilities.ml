@@ -24,7 +24,7 @@ module Logger = struct
     in
     let set_enabled _ = () in
     let set_logfile _ = Ok () in
-    { Miaou_interfaces.Logger_capability.logf; set_enabled; set_logfile }
+    {Miaou_interfaces.Logger_capability.logf; set_enabled; set_logfile}
 end
 
 module System : System = struct
@@ -141,29 +141,29 @@ end
 let register () =
   Miaou_interfaces.Capability.register
     Installer_capability.key
-    (module Installer : Installer);
+    (module Installer : Installer) ;
   Miaou_interfaces.Capability.register
     Package_manager_capability.key
-    (module Package_manager : Package_manager);
+    (module Package_manager : Package_manager) ;
   Miaou_interfaces.Capability.register
     Tezos_node_manager_capability.key
-    (module Tezos_node_manager : Tezos_node_manager);
+    (module Tezos_node_manager : Tezos_node_manager) ;
   Miaou_interfaces.Capability.register
     Tezos_client_manager_capability.key
-    (module Tezos_client_manager : Tezos_client_manager);
+    (module Tezos_client_manager : Tezos_client_manager) ;
   Miaou_interfaces.Capability.register
     System_capability.key
-    (module System : System);
+    (module System : System) ;
   Miaou_interfaces.Capability.register
     Service_manager_capability.key
-    (module Service_manager : Service_manager);
+    (module Service_manager : Service_manager) ;
   Miaou_interfaces.Capability.register
     Network_explorer_capability.key
-    (module Network_explorer : Network_explorer);
+    (module Network_explorer : Network_explorer) ;
   Miaou_interfaces.Capability.register
     Snapshot_provider_capability.key
-    (module Snapshot_provider : Snapshot_provider);
-  Miaou_interfaces.Logger_capability.set (Logger.make ());
+    (module Snapshot_provider : Snapshot_provider) ;
+  Miaou_interfaces.Logger_capability.set (Logger.make ()) ;
   Miaou_interfaces.Service_lifecycle.register
     (Miaou_interfaces.Service_lifecycle.create
        ~start:Service_lifecycle_impl.start

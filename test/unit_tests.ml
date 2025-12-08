@@ -432,9 +432,7 @@ let installer_snapshot_plan_tzinit () =
       | Error (`Msg msg) -> Alcotest.failf "tzinit plan error: %s" msg)
 
 let installer_snapshot_metadata_variants () =
-  let no_meta =
-    Installer.For_tests.snapshot_metadata_of_plan No_snapshot
-  in
+  let no_meta = Installer.For_tests.snapshot_metadata_of_plan No_snapshot in
   Alcotest.(check bool) "no auto" false no_meta.auto ;
   let direct_meta =
     Installer.For_tests.snapshot_metadata_of_plan
@@ -1231,8 +1229,7 @@ let systemd_install_dropin_and_service_commands () =
                 expect_ok (Systemd.stop ~role:"node" ~instance:"alpha")
               in
               let () =
-                expect_ok
-                  (Systemd.restart ~role:"node" ~instance:"alpha")
+                expect_ok (Systemd.restart ~role:"node" ~instance:"alpha")
               in
               Systemd.remove_dropin ~role:"node" ~instance:"alpha" ;
               Alcotest.(check bool)

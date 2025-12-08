@@ -590,14 +590,11 @@ let disable ~role ~instance ~stop_now =
   let action = if stop_now then ["disable"; "--now"] else ["disable"] in
   run_systemctl (action @ [unit])
 
-let start ~role ~instance =
-  run_systemctl ["start"; unit_name role instance]
+let start ~role ~instance = run_systemctl ["start"; unit_name role instance]
 
-let stop ~role ~instance =
-  run_systemctl ["stop"; unit_name role instance]
+let stop ~role ~instance = run_systemctl ["stop"; unit_name role instance]
 
-let restart ~role ~instance =
-  run_systemctl ["restart"; unit_name role instance]
+let restart ~role ~instance = run_systemctl ["restart"; unit_name role instance]
 
 let remove_dropin ~role ~instance =
   let path = dropin_dir role instance in

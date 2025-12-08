@@ -1,9 +1,11 @@
 module type S = sig
-  val start : role:string -> instance:string -> (unit, [> `Msg of string]) result
+  val start :
+    role:string -> instance:string -> (unit, [> `Msg of string]) result
 
   val stop : role:string -> instance:string -> (unit, [> `Msg of string]) result
 
-  val restart : role:string -> instance:string -> (unit, [> `Msg of string]) result
+  val restart :
+    role:string -> instance:string -> (unit, [> `Msg of string]) result
 
   val enable :
     role:string ->
@@ -17,10 +19,12 @@ module type S = sig
     stop_now:bool ->
     (unit, [> `Msg of string]) result
 
-  val is_active : role:string -> instance:string -> (bool, [> `Msg of string]) result
+  val is_active :
+    role:string -> instance:string -> (bool, [> `Msg of string]) result
 
   val is_enabled :
     role:string -> instance:string -> (string, [> `Msg of string]) result
 
-  val status : role:string -> instance:string -> (string, [> `Msg of string]) result
+  val status :
+    role:string -> instance:string -> (string, [> `Msg of string]) result
 end

@@ -229,18 +229,12 @@ let remove_modal state =
                 ( "remove",
                   fun () ->
                     let* (module I) = require_installer () in
-                    I.remove_service
-                      ~delete_data_dir:false
-                      ~instance
-                      ~role )
+                    I.remove_service ~delete_data_dir:false ~instance ~role )
             | `RemoveData ->
                 ( "remove",
                   fun () ->
                     let* (module I) = require_installer () in
-                    I.remove_service
-                      ~delete_data_dir:true
-                      ~instance
-                      ~role )
+                    I.remove_service ~delete_data_dir:true ~instance ~role )
             | `Purge ->
                 ( "purge",
                   fun () ->
@@ -351,17 +345,26 @@ let instance_actions_modal state =
           | `Start ->
               run_unit_action ~verb:"start" ~instance (fun () ->
                   let cap = Miaou_interfaces.Service_lifecycle.require () in
-                  Miaou_interfaces.Service_lifecycle.start cap ~role ~service:instance
+                  Miaou_interfaces.Service_lifecycle.start
+                    cap
+                    ~role
+                    ~service:instance
                   |> Result.map_error (fun e -> `Msg e))
           | `Stop ->
               run_unit_action ~verb:"stop" ~instance (fun () ->
                   let cap = Miaou_interfaces.Service_lifecycle.require () in
-                  Miaou_interfaces.Service_lifecycle.stop cap ~role ~service:instance
+                  Miaou_interfaces.Service_lifecycle.stop
+                    cap
+                    ~role
+                    ~service:instance
                   |> Result.map_error (fun e -> `Msg e))
           | `Restart ->
               run_unit_action ~verb:"restart" ~instance (fun () ->
                   let cap = Miaou_interfaces.Service_lifecycle.require () in
-                  Miaou_interfaces.Service_lifecycle.restart cap ~role ~service:instance
+                  Miaou_interfaces.Service_lifecycle.restart
+                    cap
+                    ~role
+                    ~service:instance
                   |> Result.map_error (fun e -> `Msg e))
           | `RefreshSnapshot -> refresh_modal state |> ignore
           | `Logs -> view_logs state |> ignore
@@ -479,21 +482,24 @@ let bulk_action_modal state =
         | `Start ->
             apply "start" (fun svc ->
                 let cap = Miaou_interfaces.Service_lifecycle.require () in
-                Miaou_interfaces.Service_lifecycle.start cap
+                Miaou_interfaces.Service_lifecycle.start
+                  cap
                   ~service:svc.Service.instance
                   ~role:svc.Service.role
                 |> Result.map_error (fun e -> `Msg e))
         | `Stop ->
             apply "stop" (fun svc ->
                 let cap = Miaou_interfaces.Service_lifecycle.require () in
-                Miaou_interfaces.Service_lifecycle.stop cap
+                Miaou_interfaces.Service_lifecycle.stop
+                  cap
                   ~service:svc.Service.instance
                   ~role:svc.Service.role
                 |> Result.map_error (fun e -> `Msg e))
         | `Restart ->
             apply "restart" (fun svc ->
                 let cap = Miaou_interfaces.Service_lifecycle.require () in
-                Miaou_interfaces.Service_lifecycle.restart cap
+                Miaou_interfaces.Service_lifecycle.restart
+                  cap
                   ~service:svc.Service.instance
                   ~role:svc.Service.role
                 |> Result.map_error (fun e -> `Msg e))) ;

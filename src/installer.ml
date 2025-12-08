@@ -433,9 +433,7 @@ let import_snapshot_for_instance ~(instance : string) ?snapshot_uri
       ~snapshot_uri_override:snapshot_uri
       ~snapshot_kind_override:snapshot_kind
   in
-  let* was_active =
-    Systemd.is_active ~role:"node" ~instance:service.instance
-  in
+  let* was_active = Systemd.is_active ~role:"node" ~instance:service.instance in
   let* () = Systemd.stop ~role:"node" ~instance:service.instance in
   let* () =
     perform_snapshot_plan
@@ -456,8 +454,7 @@ let import_snapshot_for_instance ~(instance : string) ?snapshot_uri
       ~logging_mode:service.logging_mode
   in
   let* () =
-    if was_active then
-      Systemd.start ~role:"node" ~instance:service.instance
+    if was_active then Systemd.start ~role:"node" ~instance:service.instance
     else Ok ()
   in
   Ok ()
@@ -505,9 +502,7 @@ let refresh_instance_from_snapshot ~(instance : string) ?snapshot_uri
         restored := true ;
         Ok ()
   in
-  let* was_active =
-    Systemd.is_active ~role:"node" ~instance:service.instance
-  in
+  let* was_active = Systemd.is_active ~role:"node" ~instance:service.instance in
   let* () = Systemd.stop ~role:"node" ~instance:service.instance in
   let result =
     let* () = Common.remove_tree service.data_dir in
@@ -539,8 +534,7 @@ let refresh_instance_from_snapshot ~(instance : string) ?snapshot_uri
         ~logging_mode:service.logging_mode
     in
     let* () =
-      if was_active then
-        Systemd.start ~role:"node" ~instance:service.instance
+      if was_active then Systemd.start ~role:"node" ~instance:service.instance
       else Ok ()
     in
     Ok ()
@@ -647,10 +641,7 @@ let install_node (request : node_request) =
   let* () = Systemd.sync_logrotate (logrotate_specs_of services) in
   let* () =
     if request.auto_enable then
-      Systemd.enable
-        ~role:"node"
-        ~instance:request.instance
-        ~start_now:true
+      Systemd.enable ~role:"node" ~instance:request.instance ~start_now:true
     else Ok ()
   in
   Ok service
@@ -904,10 +895,7 @@ let install_signer (request : signer_request) =
   in
   let* () =
     if request.auto_enable then
-      Systemd.enable
-        ~role:"signer"
-        ~instance:request.instance
-        ~start_now:true
+      Systemd.enable ~role:"signer" ~instance:request.instance ~start_now:true
     else Ok ()
   in
   Ok service
