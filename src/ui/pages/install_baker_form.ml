@@ -218,7 +218,8 @@ let edit_field s =
           if f.start_now then
             match Miaou_interfaces.Service_lifecycle.get () with
             | Some sl ->
-                Miaou_interfaces.Service_lifecycle.start sl
+                Miaou_interfaces.Service_lifecycle.start
+                  sl
                   ~role:"baker"
                   ~service:f.instance_name
                 |> Result.map_error (fun e -> `Msg e)
@@ -250,8 +251,6 @@ let handle_key s key ~size:_ =
     | Some Keys.Enter -> edit_field s |> refresh
     | _ -> s
 
-let reverse s = Widgets.ansi "7" s
-
 let view s ~focus:_ ~size =
   let f = s.form in
   let items =
@@ -272,12 +271,7 @@ let view s ~focus:_ ~size =
         else "Incomplete" );
     ]
   in
-  let rows =
-    List.mapi
-      (fun i (l, v) ->
-        if i = s.cursor then (reverse l, reverse v) else (l, v))
-      items
-  in
+  let rows = items in
   let columns =
     [
       {
@@ -313,7 +307,7 @@ module Page : Miaou.Core.Tui_page.PAGE_SIG = struct
 
   let move = move
 
-  let enter _ = failwith "not used"
+  let enter s = edit_field s
 
   let service_select _ _ = failwith "not used"
 
@@ -321,7 +315,12 @@ module Page : Miaou.Core.Tui_page.PAGE_SIG = struct
 
   let back _ = failwith "not used"
 
-  let keymap _ = []
+  let keymap (_ : state) =
+    [
+      ("Up", (fun s -> move s (-1)), "up");
+      ("Down", (fun s -> move s 1), "down");
+      ("Enter", (fun s -> enter s), "open");
+    ]
 
   let view = view
 
