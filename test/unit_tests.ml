@@ -795,31 +795,47 @@ let binary_help_parses_options () =
     | Some o -> o
     | None -> Alcotest.failf "option %s not found" name
   in
-  let advertised = find "--advertised-net-port=PORT" in
-  Alcotest.(check (option string)) "advertised arg" None advertised.arg ;
+  let advertised = find "--advertised-net-port" in
+  Alcotest.(check (option string)) "advertised arg" (Some "PORT") advertised.arg ;
   Alcotest.(check bool)
     "advertised doc"
     true
     (string_contains ~needle:"instance can be reached" advertised.doc) ;
-  let rpc_addr = find "--rpc-addr=ADDR:PORT" in
+  Alcotest.(check bool)
+    "advertised kind port"
+    true
+    (Binary_help_explorer.For_tests.arg_kind_to_string advertised.kind = "port") ;
+  let rpc_addr = find "--rpc-addr" in
   Alcotest.(check bool)
     "rpc doc"
     true
     (string_contains
        ~needle:"The URL at which this RPC server instance can be reached"
        rpc_addr.doc) ;
-  let data_dir = find "--data-dir=DIR" in
+  Alcotest.(check bool)
+    "rpc kind addr:port"
+    true
+    (Binary_help_explorer.For_tests.arg_kind_to_string rpc_addr.kind = "addr_port") ;
+  let data_dir = find "--data-dir" in
   Alcotest.(check bool)
     "data dir alias captured"
     true
     (List.exists (( = ) "-d") data_dir.Binary_help_explorer.names) ;
-  let history_mode = find "--history-mode=<mode>" in
+  Alcotest.(check bool)
+    "data dir kind dir"
+    true
+    (Binary_help_explorer.For_tests.arg_kind_to_string data_dir.kind = "dir") ;
+  let history_mode = find "--history-mode" in
   Alcotest.(check bool)
     "history mode doc"
     true
     (string_contains
        ~needle:"Set the mode for the chain's data history storage"
-       history_mode.doc)
+       history_mode.doc) ;
+  Alcotest.(check bool)
+    "history mode kind text"
+    true
+    (Binary_help_explorer.For_tests.arg_kind_to_string history_mode.kind = "text")
 
 let service_json_roundtrip () =
   let logging_mode =

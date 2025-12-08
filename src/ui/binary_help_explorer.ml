@@ -6,7 +6,21 @@ module Widgets = Miaou_widgets_display.Widgets
 let ( let* ) = Result.bind
 
 (* Structured representation of a CLI option extracted from --help output. *)
-type option_entry = {names : string list; arg : string option; doc : string}
+type value_kind =
+  | Addr_port
+  | Port
+  | Addr
+  | File
+  | Dir
+  | Path
+  | Number
+  | Float
+  | Text
+
+type arg_kind = Toggle | Value of value_kind
+
+type option_entry =
+  {names : string list; arg : string option; doc : string; kind : arg_kind}
 
 (* Mutable selection entry used inside the modal. *)
 type row = {
@@ -30,6 +44,38 @@ let trim_nonempty s =
   let t = String.trim s in
   if t = "" then None else Some t
 
+let contains ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  if nlen = 0 then true else loop 0
+
+let classify_arg_kind ~names ~arg ~doc =
+  match arg with
+  | None -> Toggle
+  | Some placeholder ->
+      let text =
+        String.concat " "
+          [ String.lowercase_ascii placeholder;
+            String.lowercase_ascii doc;
+            String.concat " " (List.map String.lowercase_ascii names) ]
+      in
+      let has s = contains ~needle:(String.lowercase_ascii s) text in
+      if has "addr:port" || has "address:port" then Value Addr_port
+      else if has "port" then Value Port
+      else if has "addr" || has "address" || has "host" then Value Addr
+      else if has "file" then Value File
+      else if has "dir" || has "directory" then Value Dir
+      else if has "path" then Value Path
+      else if has "mode" then Value Text
+      else if has "float" then Value Float
+      else if has "int" || has "num" || has "number" then Value Number
+      else Value Text
+
 let split_spec_doc raw_line =
   let line = String.trim raw_line in
   let len = String.length line in
@@ -46,6 +92,21 @@ let split_spec_doc raw_line =
         String.sub line (idx + gap) (len - (idx + gap)) |> String.trim )
   | None -> (String.trim line, "")
 
+let clean_placeholder s =
+  let trimmed = String.trim s in
+  let len = String.length trimmed in
+  if len = 0 then ""
+  else
+    let rec drop_trailing i =
+      if i <= 0 then 0
+      else
+        match trimmed.[i - 1] with
+        | ',' | ';' | ')' -> drop_trailing (i - 1)
+        | _ -> i
+    in
+    let stop = drop_trailing len in
+    String.sub trimmed 0 stop
+
 let parse_spec spec =
   let tokens =
     spec |> String.split_on_char ' '
@@ -56,15 +117,24 @@ let parse_spec spec =
       (fun (names, args) tok ->
         let tok = String.trim tok in
         if tok = "," then (names, args)
-        else if String.length tok > 0 && tok.[0] = '-' then (tok :: names, args)
+        else if String.length tok > 0 && tok.[0] = '-' then
+          let name, inline_arg =
+            match String.index_opt tok '=' with
+            | None -> (tok, None)
+            | Some idx ->
+                let name = String.sub tok 0 idx in
+                let placeholder = String.sub tok (idx + 1) (String.length tok - idx - 1) in
+                (name, Some placeholder)
+          in
+          (name :: names, (match inline_arg with None -> args | Some a -> a :: args))
         else (names, tok :: args))
       ([], [])
       tokens
   in
   let arg =
-    match List.rev arg_tokens with
+    match List.rev arg_tokens |> List.filter_map trim_nonempty with
     | [] -> None
-    | xs -> Some (String.concat " " xs |> String.trim)
+    | x :: _ -> Some (clean_placeholder x)
   in
   (List.rev names, arg)
 
@@ -108,7 +178,8 @@ let parse_help output =
         let acc = finalize current acc in
         let spec, doc = split_spec_doc line in
         let names, arg = parse_spec spec in
-        let entry = {names; arg; doc} in
+        let kind = classify_arg_kind ~names ~arg ~doc in
+        let entry = {names; arg; doc; kind} in
         loop acc (Some entry) rest
     | line :: rest ->
         let trimmed = String.trim line in
@@ -121,7 +192,8 @@ let parse_help output =
                 let doc =
                   if opt.doc = "" then trimmed else opt.doc ^ " " ^ trimmed
                 in
-                Some {opt with doc}
+                let kind = classify_arg_kind ~names:opt.names ~arg:opt.arg ~doc in
+                Some {opt with doc; kind}
           in
           loop acc current rest
   in
@@ -381,4 +453,15 @@ let open_node_run_help ~app_bin_dir ~on_apply =
 
 module For_tests = struct
   let parse_help = parse_help
+  let arg_kind_to_string = function
+    | Toggle -> "toggle"
+    | Value Addr_port -> "addr_port"
+    | Value Port -> "port"
+    | Value Addr -> "addr"
+    | Value File -> "file"
+    | Value Dir -> "dir"
+    | Value Path -> "path"
+    | Value Number -> "number"
+    | Value Float -> "float"
+    | Value Text -> "text"
 end
