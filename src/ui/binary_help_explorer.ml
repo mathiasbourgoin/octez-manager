@@ -36,6 +36,12 @@ type row = {
 
 let cache : (string, option_entry list) Hashtbl.t = Hashtbl.create 3
 
+let set_help_hint ?short ?long () =
+  Miaou.Core.Help_hint.clear () ;
+  match (short, long) with
+  | None, None -> ()
+  | _ -> Miaou.Core.Help_hint.push ?short ?long ()
+
 let primary_name names =
   match
     List.find_opt
@@ -275,6 +281,51 @@ let truncate ~max_len s =
 
 let option_label entry = String.concat ", " entry.names
 
+let option_hint_markdown (row : row) : string option * string option =
+  let names_md =
+    row.opt.names
+    |> List.map (fun n -> Printf.sprintf "`%s`" n)
+    |> String.concat ", "
+  in
+  let heading =
+    match row.opt.arg with
+    | None -> Printf.sprintf "### %s" names_md
+    | Some arg -> Printf.sprintf "### %s `%s`" names_md arg
+  in
+  let doc = String.trim row.opt.doc in
+  let doc_lines =
+    if doc = "" then [] else String.split_on_char '\n' doc
+  in
+  let selection_lines =
+    if not row.selected then []
+    else
+      match row.value with
+      | Some v when String.trim v <> "" ->
+          [Printf.sprintf "- Selected: `%s`" (String.trim v)]
+      | _ -> ["- Selected"]
+  in
+  let long_lines =
+    [heading]
+    @ (if doc_lines = [] then [] else [""; String.concat "\n" doc_lines])
+    @ (if selection_lines = [] then [] else [""; String.concat "\n" selection_lines])
+  in
+  let long =
+    match List.filter (fun l -> String.trim l <> "") long_lines with
+    | [] -> None
+    | _ -> Some (String.concat "\n" long_lines)
+  in
+  let short =
+    match doc_lines with
+    | first :: _ when String.trim first <> "" ->
+        Some (Printf.sprintf "**%s** — %s" (option_label row.opt) (String.trim first))
+    | _ -> (
+        match selection_lines with
+        | first :: _ ->
+            Some (Printf.sprintf "**%s** — %s" (option_label row.opt) (String.trim first))
+        | [] -> None)
+  in
+  (short, long)
+
 let wrap_text ~width s =
   let wrap_line s =
     let len = String.length s in
@@ -328,13 +379,10 @@ let open_modal ~title ~options ~on_apply =
 
     let update_help_hint s =
       match s.rows |> Array.to_list |> fun lst -> List.nth_opt lst s.cursor with
-      | None -> Miaou.Core.Help_hint.set None
+      | None -> set_help_hint ()
       | Some row ->
-          let doc_lines = wrap_text ~width:72 row.opt.doc in
-          let text =
-            if doc_lines = [] then None else Some (String.concat "\n" doc_lines)
-          in
-          Miaou.Core.Help_hint.set text
+          let short, long = option_hint_markdown row in
+          set_help_hint ?short ?long ()
 
     let init () = {rows; cursor = 0; scroll_offset = 0; last_key = ""}
 
@@ -476,9 +524,9 @@ let open_modal ~title ~options ~on_apply =
       match current_row s with
       | None -> ()
       | Some row ->
-          let lines = wrap_text ~width:72 row.opt.doc in
+          let short, long = option_hint_markdown row in
           (* Use Help_hint so pressing '?' shows the doc without opening a modal *)
-          Miaou.Core.Help_hint.set (Some (String.concat "\n" lines))
+          set_help_hint ?short ?long ()
 
     let apply_and_close s =
       let tokens = s.rows |> Array.to_list |> format_tokens in
@@ -712,7 +760,7 @@ let open_modal ~title ~options ~on_apply =
     ~ui
     ~commit_on:[]
     ~cancel_on:["Esc"; "q"; "Q"]
-    ~on_close:(fun _ _ -> Miaou.Core.Help_hint.set None)
+    ~on_close:(fun _ _ -> Miaou.Core.Help_hint.clear ())
 
 (* Options to exclude from the node flags modal:
    - Meta options (--help, --version)

@@ -3,6 +3,15 @@ module Select_widget = Miaou_widgets_input.Select_widget
 module Textbox_widget = Miaou_widgets_input.Textbox_widget
 module Widgets = Miaou_widgets_display.Widgets
 
+let first_nonempty_line lines =
+  List.find_opt (fun l -> String.trim l <> "") lines
+
+let set_markdown_hint ?short ?long () =
+  Miaou.Core.Help_hint.clear () ;
+  match (short, long) with
+  | None, None -> ()
+  | _ -> Miaou.Core.Help_hint.push ?short ?long ()
+
 let open_text_modal ~title ~lines =
   let module Modal = struct
     type state = Pager.t
@@ -162,12 +171,19 @@ let open_choice_modal_with_hint (type choice) ~title ~(items : choice list)
       | Some choice -> describe_fn choice
       | None -> ( match items with hd :: _ -> describe_fn hd | [] -> [])
     in
+    let short_text =
+      match first_nonempty_line doc_lines with
+      | None -> None
+      | Some first -> Some (Printf.sprintf "**%s** — %s" title first)
+    in
     let long_text =
       match doc_lines with
       | [] -> None
-      | lines -> Some (String.concat "\n" lines)
+      | lines ->
+          Some
+            (Printf.sprintf "### %s\n\n%s" title (String.concat "\n" lines))
     in
-    Miaou.Core.Help_hint.set long_text
+    set_markdown_hint ?short:short_text ?long:long_text ()
   in
   let module Modal = struct
     type state = choice Select_widget.t

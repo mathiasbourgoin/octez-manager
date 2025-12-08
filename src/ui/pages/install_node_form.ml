@@ -83,6 +83,12 @@ let snapshot_cache : (string, Snapshots.entry list) Hashtbl.t = Hashtbl.create 7
 
 let of_rresult = function Ok v -> Ok v | Error (`Msg msg) -> Error msg
 
+let push_help_hint ?short ?long () =
+  Miaou.Core.Help_hint.clear () ;
+  match (short, long) with
+  | None, None -> ()
+  | _ -> Miaou.Core.Help_hint.push ?short ?long ()
+
 let fetch_network_infos () =
   let fallback () = of_rresult (Teztnets.list_networks ()) in
   match
@@ -218,6 +224,98 @@ let move s delta =
   (* Number of fields + confirm *)
   let cursor = max 0 (min max_cursor (s.cursor + delta)) in
   {s with cursor}
+
+let field_hint (f : form_state) cursor : string option * string option =
+  let mk heading body =
+    let short = Printf.sprintf "**%s** — %s" heading body in
+    let long = Printf.sprintf "### %s\n\n%s" heading body in
+    (Some short, Some long)
+  in
+  match cursor with
+  | 0 ->
+      mk "Instance Name"
+        (Printf.sprintf
+           "Unique label (e.g., `%s`); used in service names and data/log \
+            directories. Must be unique per host."
+           f.instance_name)
+  | 1 ->
+      mk "Network"
+        (Printf.sprintf
+           "Target Tezos network (e.g., `%s`). Mainnet/ghostnet are preloaded; \
+            custom URLs work if they expose bootstrap peers."
+           f.network)
+  | 2 ->
+      mk "History Mode"
+        (Printf.sprintf
+           "Rolling (light) vs full/archive (heavier). Must match any snapshot \
+            you import. Current: `%s`."
+           f.history_mode)
+  | 3 ->
+      mk "Data Dir"
+        (Printf.sprintf
+           "Where chain data lives (e.g., /var/lib/octez/node-<name>). Current: \
+            `%s`. Existing dirs trigger refresh/keep prompt."
+           f.data_dir)
+  | 4 ->
+      mk "App Bin Dir"
+        (Printf.sprintf
+           "Directory containing octez binaries; expects `octez-node` inside. \
+            Current: `%s`."
+           f.app_bin_dir)
+  | 5 ->
+      mk "RPC Address"
+        (Printf.sprintf
+           "Host:port for RPC (default 127.0.0.1:8732). Must be free. Current: \
+            `%s`."
+           f.rpc_addr)
+  | 6 ->
+      mk "P2P Address"
+        (Printf.sprintf
+           "Host:port to accept peers (default 0.0.0.0:9732). Port must be \
+            free. Current: `%s`."
+           f.p2p_addr)
+  | 7 ->
+      mk "Service User"
+        (Printf.sprintf
+           "Account running the service (current: `%s`). If root and missing, \
+            installer will create it."
+           f.service_user)
+  | 8 ->
+      mk "Logging"
+        (Printf.sprintf
+           "`File` writes node.log under the instance log dir; `Journald` uses \
+            systemd journal. Current: `%s`."
+           (match f.logging with `File -> "File" | `Journald -> "Journald"))
+  | 9 -> mk "Enable on Boot" "Runs `systemctl enable` so the node auto-starts."
+  | 10 -> mk "Start Now" "Start the node service immediately after install."
+  | 11 ->
+      mk "Snapshot"
+        (match f.snapshot with
+        | `None ->
+            "Bootstrap from genesis. Importing a snapshot speeds sync; pick one \
+             matching the history mode."
+        | `Url u ->
+            Printf.sprintf
+              "Custom snapshot URL: `%s`. Ensure it matches the network and \
+               history mode."
+              u
+        | `Tzinit sel ->
+            Printf.sprintf
+              "tzinit preset: %s (%s). Matches %s history mode."
+              sel.label sel.kind_slug sel.kind_slug)
+  | 12 ->
+      mk "Extra Args"
+        "Additional `octez-node run` flags. Press ? to browse supported \
+         options; leave blank for defaults."
+  | 13 ->
+      mk "Confirm & Install"
+        "Runs the installer with current values. All required fields must be \
+         valid before proceeding."
+  | _ -> (None, None)
+
+let apply_field_hint s =
+  let short, long = field_hint s.form s.cursor in
+  push_help_hint ?short ?long ()
 
 let parse_port addr =
   match String.split_on_char ':' addr with
@@ -684,7 +782,9 @@ let handle_key s key ~size:_ =
     refresh s)
   else
     match Keys.of_string key with
-    | Some (Keys.Char "Esc") -> {s with next_page = Some "__BACK__"}
+    | Some (Keys.Char "Esc") ->
+        push_help_hint () ;
+        {s with next_page = Some "__BACK__"}
     | Some Keys.Up -> move s (-1)
     | Some Keys.Down -> move s 1
     | Some (Keys.Char "?") -> open_binary_help s |> refresh
@@ -692,6 +792,7 @@ let handle_key s key ~size:_ =
     | _ -> s
 
 let view s ~focus:_ ~size =
+  apply_field_hint s ;
   let f = s.form in
   let network_value =
     if !network_cache = [] then f.network else network_display_name f.network
