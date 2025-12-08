@@ -371,59 +371,6 @@ let instance_actions_modal state =
           | `Remove -> remove_modal state |> ignore) ;
       state)
 
-let open_diagnostics_modal () =
-  let states = Data.load_service_states ~detail:true () in
-  let lines = Data.diagnostics_lines states in
-  Modal_helpers.open_text_modal ~title:"Diagnostics" ~lines
-
-let open_activity_modal () =
-  let states = Data.load_service_states () in
-  let lines = Data.activity_lines states in
-  Modal_helpers.open_text_modal ~title:"Activity" ~lines
-
-let open_menu_modal state =
-  Modal_helpers.open_choice_modal
-    ~title:"Menu"
-    ~items:
-      [
-        `Dashboard;
-        `Installers;
-        `Diagnostics;
-        `Activity;
-        `Networks;
-        `Snapshots;
-        `Signers;
-        `Settings;
-        `Jobs;
-        `Refresh;
-        `Back;
-      ]
-    ~to_string:(function
-      | `Dashboard -> "Dashboard"
-      | `Installers -> "Installers Hub"
-      | `Diagnostics -> "Diagnostics"
-      | `Activity -> "Activity"
-      | `Networks -> "Available Networks"
-      | `Snapshots -> "Browse Snapshots"
-      | `Signers -> "Signers"
-      | `Settings -> "Settings"
-      | `Jobs -> "Background Jobs"
-      | `Refresh -> "Refresh"
-      | `Back -> "Back")
-    ~on_select:(function
-      | `Dashboard -> Context.navigate "dashboard"
-      | `Installers -> Context.navigate Installers.name
-      | `Diagnostics -> open_diagnostics_modal ()
-      | `Activity -> open_activity_modal ()
-      | `Networks -> Context.navigate Networks_page.name
-      | `Snapshots -> Context.navigate Snapshots_page.name
-      | `Signers -> Context.navigate Signers_page.name
-      | `Settings -> Context.navigate Settings_page.name
-      | `Jobs -> Context.navigate Jobs_page.name
-      | `Refresh -> ()
-      | `Back -> Context.navigate "__BACK__") ;
-  state
-
 let bulk_action_modal state =
   if state.filtered = [] then (
     Modal_helpers.show_error ~title:"Bulk actions" "No instances match filter" ;
@@ -561,7 +508,6 @@ struct
       ("c", create_menu_modal, "Create service");
       ("f", cycle_filter, "Cycle filter");
       ("b", bulk_action_modal, "Bulk actions");
-      ("m", open_menu_modal, "Menu");
       ("R", refresh_modal, "Refresh snapshot");
     ]
 
@@ -626,7 +572,6 @@ struct
         | Some (Keys.Char "c") -> create_menu_modal s
         | Some (Keys.Char "f") -> cycle_filter s
         | Some (Keys.Char "b") -> bulk_action_modal s
-        | Some (Keys.Char "m") -> open_menu_modal s
         | Some (Keys.Char " ") -> force_refresh_cmd s
         | Some (Keys.Char "r") -> force_refresh_cmd s
         | Some (Keys.Char "R") -> refresh_modal s

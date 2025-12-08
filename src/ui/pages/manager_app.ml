@@ -4,17 +4,10 @@ open Octez_manager_lib
 let ( let* ) = Result.bind
 
 let register_pages () =
-  Dashboard.register () ;
   Instances.register () ;
   Instance_details.register () ;
-  Installers.register () ;
   Install_node_form.register () ;
-  Install_baker_form.register () ;
-  Snapshots_page.register () ;
-  Networks_page.register () ;
-  Signers_page.register () ;
-  Settings_page.register () ;
-  Jobs_page.register ()
+  Install_baker_form.register ()
 
 let find_page_or_default name default_name =
   let module Registry = Miaou.Core.Registry in
@@ -29,7 +22,7 @@ let find_page_or_default name default_name =
                name
                default_name) ;
           Ok page
-      | None -> Error (`Msg "Dashboard page missing from registry"))
+      | None -> Error (`Msg "Instances page missing from registry"))
 
 let run ?page ?(log = false) ?logfile () =
   Capabilities.register () ;
