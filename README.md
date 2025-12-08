@@ -13,6 +13,14 @@ This repository is a work-in-progress extraction from the larger
 now.  The TUI, wizard flows, and analytics are intentionally left out
 so this tool stays small and auditable.
 
+## Prerequisites
+
+While Miaou is not yet released on opam, you must pin it manually before building:
+
+```sh
+opam pin add miaou <path-to-miaou-repo>#<branch>
+```
+
 ## Quick start
 
 ```sh
