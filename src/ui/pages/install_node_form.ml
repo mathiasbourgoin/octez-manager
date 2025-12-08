@@ -819,9 +819,7 @@ let view s ~focus:_ ~size =
       in
       Widgets.bg 160 (Widgets.fg 15 (Widgets.bold msg))
   in
-  let header =
-    [Widgets.title_highlight " Install Node "; ""; status_banner; ""]
-  in
+  let header = [Widgets.title_highlight " Install Node "; status_banner] in
   let footer =
     [Widgets.dim "↑/↓ navigate, Enter to edit, ? node flags, Esc back"]
   in
