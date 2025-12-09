@@ -31,4 +31,9 @@ val list : network_slug:string -> (entry list, Rresult.R.msg) result
 module For_tests : sig
   val with_fetch :
     (string -> (int * string, Rresult.R.msg) result) -> (unit -> 'a) -> 'a
+
+  val fetch_html_with :
+    try_eio:(unit -> (int * string, Rresult.R.msg) result) ->
+    try_curl:(unit -> (int * string, Rresult.R.msg) result) ->
+    (int * string, Rresult.R.msg) result
 end

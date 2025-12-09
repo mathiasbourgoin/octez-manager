@@ -55,21 +55,82 @@ let sanitize_kind_input k =
     let slug = Buffer.contents buf in
     if slug = "" then None else Some slug
 
+let https_connector =
+  lazy
+    (Mirage_crypto_rng_unix.use_default () ;
+     match Ca_certs.authenticator () with
+     | Error (`Msg msg) -> R.error_msgf "TLS authenticator: %s" msg
+     | Ok authenticator -> (
+         match Tls.Config.client ~authenticator () with
+         | Error (`Msg msg) -> R.error_msgf "TLS config: %s" msg
+         | Ok tls_config ->
+             let https uri socket =
+               let host =
+                 match Uri.host uri with
+                 | None -> None
+                 | Some h -> (
+                     match Domain_name.of_string h with
+                     | Ok raw -> (
+                         match Domain_name.host raw with
+                         | Ok host -> Some host
+                         | Error _ -> None)
+                     | Error _ -> None)
+               in
+               Tls_eio.client_of_flow ?host tls_config socket
+             in
+             Ok https))
+
+let fetch_html_curl url =
+  (* Fallback for environments where io_uring setup fails. *)
+  let cmd =
+    Printf.sprintf
+      "curl -fsSL --max-time 8 --connect-timeout 2 -w '\n%%{http_code}' %s"
+      (Common.sh_quote url)
+  in
+  match Common.run_out ["/bin/sh"; "-c"; cmd] with
+  | Ok out -> (
+      let lines = String.split_on_char '\n' out |> List.rev in
+      match lines with
+      | code_str :: rev_body -> (
+          match int_of_string_opt (String.trim code_str) with
+          | Some code ->
+              let body = String.concat "\n" (List.rev rev_body) in
+              Ok (code, body)
+          | None -> Error (`Msg (Printf.sprintf "curl parse error for %s" url)))
+      | [] -> Error (`Msg (Printf.sprintf "curl returned no status for %s" url))
+      )
+  | Error (`Msg msg) ->
+      Error (`Msg (Printf.sprintf "curl fetch failed: %s" msg))
+
 let fetch_html url =
-  let open Lwt.Infix in
-  try
-    Lwt_main.run
-      (let uri = Uri.of_string url in
-       Cohttp_lwt_unix.Client.get uri >>= fun (resp, body) ->
-       Cohttp_lwt.Body.to_string body >|= fun body ->
-       let status = Cohttp.Response.status resp in
-       let code = Cohttp.Code.code_of_status status in
-       (code, body))
-    |> fun res -> Ok res
-  with exn ->
-    Error
-      (`Msg
-         (Format.sprintf "Failed to fetch %s: %s" url (Printexc.to_string exn)))
+  let try_eio () =
+    try
+      match Lazy.force https_connector with
+      | Error _ as e -> e
+      | Ok https ->
+          Eio_main.run (fun env ->
+              Eio.Switch.run (fun sw ->
+                  let client =
+                    Cohttp_eio.Client.make ~https:(Some https) env#net
+                  in
+                  let uri = Uri.of_string url in
+                  let resp, body = Cohttp_eio.Client.get client ~sw uri in
+                  let status = Cohttp.Response.status resp in
+                  let code = Cohttp.Code.code_of_status status in
+                  let body =
+                    Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int
+                  in
+                  (code, body)))
+          |> fun res -> Ok res
+    with exn ->
+      Error
+        (`Msg
+           (Format.sprintf
+              "Failed to fetch %s via eio: %s"
+              url
+              (Printexc.to_string exn)))
+  in
+  match try_eio () with Ok _ as ok -> ok | Error _ -> fetch_html_curl url
 
 let fetch_html_ref = ref fetch_html
 
@@ -278,6 +339,16 @@ let with_fetch (fetch : string -> (int * string, Rresult.R.msg) result) f =
 
 module For_tests = struct
   let with_fetch fetch f = with_fetch fetch f
+
+  let fetch_html_with ~try_eio ~try_curl : (int * string, Rresult.R.msg) result
+      =
+    let try_eio_safe () =
+      try try_eio ()
+      with exn ->
+        Error
+          (`Msg (Printf.sprintf "eio fetch exn: %s" (Printexc.to_string exn)))
+    in
+    match try_eio_safe () with Ok _ as ok -> ok | Error _ -> try_curl ()
 end
 
 let list ~network_slug : (entry list, Rresult.R.msg) result =

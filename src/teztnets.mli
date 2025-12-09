@@ -19,3 +19,10 @@ val list_networks :
   (network_info list, [> Rresult.R.msg]) result
 
 val fallback_pairs : (string * string) list
+
+module For_tests : sig
+  val fetch_json_with :
+    via_eio:(unit -> (string, Rresult.R.msg) result) ->
+    via_curl:(unit -> (string, Rresult.R.msg) result) ->
+    (string, Rresult.R.msg) result
+end

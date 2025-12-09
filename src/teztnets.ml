@@ -2,26 +2,70 @@ open Rresult
 
 let teztnets_url = "https://teztnets.com/teztnets.json"
 
+let https_connector =
+  lazy
+    (Mirage_crypto_rng_unix.use_default () ;
+     match Ca_certs.authenticator () with
+     | Error (`Msg msg) -> R.error_msgf "TLS authenticator: %s" msg
+     | Ok authenticator -> (
+         match Tls.Config.client ~authenticator () with
+         | Error (`Msg msg) -> R.error_msgf "TLS config: %s" msg
+         | Ok tls_config ->
+             let https uri socket =
+               let host =
+                 match Uri.host uri with
+                 | None -> None
+                 | Some h -> (
+                     match Domain_name.of_string h with
+                     | Ok raw -> (
+                         match Domain_name.host raw with
+                         | Ok host -> Some host
+                         | Error _ -> None)
+                     | Error _ -> None)
+               in
+               Tls_eio.client_of_flow ?host tls_config socket
+             in
+             Ok https))
+
+let fetch_via_curl () : (string, [> R.msg]) result =
+  match
+    Common.run_out
+      ["curl"; "-fsLm"; "5"; "--connect-timeout"; "2"; teztnets_url]
+  with
+  | Ok body when String.trim body <> "" -> Ok body
+  | Ok _ -> R.error_msg "Empty teztnets.json response"
+  | Error (`Msg m) -> R.error_msg m
+
 let fetch_json () : (string, [> R.msg]) result =
-  let open Lwt.Infix in
-  try
-    Lwt_main.run
-      (let uri = Uri.of_string teztnets_url in
-       Cohttp_lwt_unix.Client.get uri >>= fun (resp, body) ->
-       let status = Cohttp.Response.status resp in
-       if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then
-         Cohttp_lwt.Body.to_string body >|= fun body ->
-         if String.trim body = "" then
-           R.error_msg "Empty teztnets.json response"
-         else Ok body
-       else
-         let code = Cohttp.Code.code_of_status status in
-         let msg =
-           Format.asprintf "HTTP %d while fetching %s" code teztnets_url
-         in
-         Lwt.return (R.error_msg msg))
-  with exn ->
-    R.error_msgf "Failed to fetch teztnets.json: %s" (Printexc.to_string exn)
+  let via_eio () =
+    match Lazy.force https_connector with
+    | Error _ as e -> e
+    | Ok https -> (
+        try
+          Eio_main.run (fun env ->
+              Eio.Switch.run (fun sw ->
+                  let client =
+                    Cohttp_eio.Client.make ~https:(Some https) env#net
+                  in
+                  let uri = Uri.of_string teztnets_url in
+                  let resp, body = Cohttp_eio.Client.get client ~sw uri in
+                  let status = Cohttp.Response.status resp in
+                  let code = Cohttp.Code.code_of_status status in
+                  let body =
+                    Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int
+                  in
+                  if Cohttp.Code.is_success code then
+                    if String.trim body = "" then
+                      R.error_msg "Empty teztnets.json response"
+                    else Ok body
+                  else
+                    R.error_msgf "HTTP %d while fetching %s" code teztnets_url))
+        with exn ->
+          R.error_msgf
+            "Failed to fetch teztnets.json via eio: %s"
+            (Printexc.to_string exn))
+  in
+  match via_eio () with Ok _ as ok -> ok | Error _ -> fetch_via_curl ()
 
 type network_info = {
   alias : string;
@@ -205,3 +249,23 @@ let fallback_pairs =
   List.map
     (fun n -> (Option.value ~default:n.alias n.human_name, n.network_url))
     fallback_networks
+
+module For_tests = struct
+  let fetch_json_with :
+      via_eio:(unit -> (string, Rresult.R.msg) result) ->
+      via_curl:(unit -> (string, Rresult.R.msg) result) ->
+      (string, Rresult.R.msg) result =
+   fun ~via_eio ~via_curl ->
+    let via_eio_safe () =
+      try via_eio ()
+      with exn -> R.error_msgf "eio fetch exn: %s" (Printexc.to_string exn)
+    in
+    let via_curl : unit -> (string, Rresult.R.msg) result = via_curl in
+    let via_curl_safe () : (string, Rresult.R.msg) result = via_curl () in
+    let result : (string, Rresult.R.msg) result =
+      match via_eio_safe () with
+      | Ok _ as ok -> ok
+      | Error _ -> via_curl_safe ()
+    in
+    result
+end
