@@ -76,25 +76,77 @@ let view_details svc =
   let field label value =
     Printf.sprintf "%s %s" (Widgets.dim (Printf.sprintf "%-15s" label)) value
   in
-  [
-    field "Instance" svc.Service.instance;
-    field "Role" svc.Service.role;
-    field "Network" svc.Service.network;
-    field "History Mode" (History_mode.to_string svc.Service.history_mode);
-    field "Data Dir" svc.Service.data_dir;
-    field "RPC Addr" svc.Service.rpc_addr;
-    field "P2P Addr" svc.Service.net_addr;
-    field "Service User" svc.Service.service_user;
-    field "Bin Dir" svc.Service.app_bin_dir;
-    field "Created At" svc.Service.created_at;
-    field
-      "Logging"
-      (match svc.Service.logging_mode with
-      | Logging_mode.Journald -> "journald"
-      | Logging_mode.File {path; rotate} ->
-          Printf.sprintf "file:%s (rotate=%b)" path rotate);
-    field "Extra Args" (String.concat " " svc.Service.extra_args);
-  ]
+  match svc.Service.role with
+  | "baker" ->
+      let env =
+        match Node_env.read ~inst:svc.Service.instance with
+        | Ok pairs -> pairs
+        | Error _ -> []
+      in
+      let lookup key =
+        match List.assoc_opt key env with Some v -> String.trim v | None -> ""
+      in
+      let delegates =
+        match lookup "OCTEZ_BAKER_DELEGATES_CSV" with
+        | "" -> "(none)"
+        | csv ->
+            csv |> String.split_on_char ',' |> List.map String.trim
+            |> List.filter (( <> ) "")
+            |> ( function [] -> ["(none)"] | xs -> xs )
+            |> String.concat ", "
+      in
+      let node_mode = lookup "OCTEZ_BAKER_NODE_MODE" in
+      let node_endpoint = lookup "OCTEZ_NODE_ENDPOINT" in
+      let dal_endpoint = lookup "OCTEZ_DAL_ENDPOINT" in
+      let base_dir = lookup "OCTEZ_BAKER_BASE_DIR" in
+      let extra_args = lookup "OCTEZ_BAKER_EXTRA_ARGS" in
+      let logging =
+        match svc.Service.logging_mode with
+        | Logging_mode.Journald -> "journald"
+        | Logging_mode.File {path; rotate} ->
+            Printf.sprintf "file:%s (rotate=%b)" path rotate
+      in
+      [
+        field "Instance" svc.Service.instance;
+        field "Role" svc.Service.role;
+        field "Network" svc.Service.network;
+        field "History Mode" (History_mode.to_string svc.Service.history_mode);
+        field "Baker Base Dir" (if base_dir = "" then "(unset)" else base_dir);
+        field "Delegates" delegates;
+        field "Node Mode" (if node_mode = "" then "remote" else node_mode);
+        field
+          "Node Endpoint"
+          (if node_endpoint = "" then "(unset)" else node_endpoint);
+        field
+          "DAL Endpoint"
+          (if dal_endpoint = "" then "(none)" else dal_endpoint);
+        field "Data Dir" svc.Service.data_dir;
+        field "Service User" svc.Service.service_user;
+        field "Bin Dir" svc.Service.app_bin_dir;
+        field "Created At" svc.Service.created_at;
+        field "Logging" logging;
+        field "Extra Args" (if extra_args = "" then "(none)" else extra_args);
+      ]
+  | _ ->
+      [
+        field "Instance" svc.Service.instance;
+        field "Role" svc.Service.role;
+        field "Network" svc.Service.network;
+        field "History Mode" (History_mode.to_string svc.Service.history_mode);
+        field "Data Dir" svc.Service.data_dir;
+        field "RPC Addr" svc.Service.rpc_addr;
+        field "P2P Addr" svc.Service.net_addr;
+        field "Service User" svc.Service.service_user;
+        field "Bin Dir" svc.Service.app_bin_dir;
+        field "Created At" svc.Service.created_at;
+        field
+          "Logging"
+          (match svc.Service.logging_mode with
+          | Logging_mode.Journald -> "journald"
+          | Logging_mode.File {path; rotate} ->
+              Printf.sprintf "file:%s (rotate=%b)" path rotate);
+        field "Extra Args" (String.concat " " svc.Service.extra_args);
+      ]
 
 let view s ~focus:_ ~size =
   let body =

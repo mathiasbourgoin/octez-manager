@@ -35,14 +35,18 @@ type daemon_request = {
   auto_enable : bool;
 }
 
+type baker_node_mode = [`Auto | `Local | `Remote]
+
 type baker_request = {
   instance : string;
   network : string option;
   node_instance : string option;
   node_data_dir : string option;
   node_endpoint : string option;
+  node_mode : baker_node_mode;
   base_dir : string option;
   delegates : string list;
+  dal_endpoint : string option;
   extra_args : string list;
   service_user : string;
   app_bin_dir : string;

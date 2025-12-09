@@ -9,6 +9,7 @@ module Widgets = Miaou_widgets_display.Widgets
 module Vsection = Miaou_widgets_layout.Vsection
 module Keys = Miaou.Core.Keys
 module Service_state = Data.Service_state
+module Metrics = Rpc_metrics
 open Octez_manager_lib
 open Rresult
 
@@ -139,6 +140,95 @@ let enabled_badge (st : Service_state.t) =
   | Some false -> Widgets.dim "[disabled]"
   | None -> Widgets.dim "[unknown]"
 
+let rpc_status_line ~(service_status : Service_state.status) (svc : Service.t) =
+  let stopped =
+    match service_status with Service_state.Running -> false | _ -> true
+  in
+  (* Show service status when not running *)
+  let service_prefix =
+    match service_status with
+    | Service_state.Running -> None
+    | Service_state.Stopped -> Some (Widgets.yellow "stopped")
+    | Service_state.Unknown msg ->
+        Some (Widgets.red ("failed" ^ if msg = "" then "" else ": " ^ msg))
+  in
+  match Metrics.get ~instance:svc.Service.instance with
+  | None -> (
+      (* No metrics yet *)
+      match service_prefix with
+      | Some prefix -> prefix
+      | None -> Widgets.dim "pending")
+  | Some
+      {
+        Metrics.head_level;
+        bootstrapped;
+        last_rpc_refresh;
+        chain_id;
+        proto;
+        last_error;
+        _;
+      } ->
+      let error_prefix =
+        match last_error with
+        | Some msg ->
+            let msg =
+              if String.length msg > 64 then String.sub msg 0 64 else msg
+            in
+            Some (Widgets.red (Printf.sprintf "rpc error: %s" msg))
+        | None -> None
+      in
+      let lvl =
+        match head_level with Some l -> Printf.sprintf "L%d" l | None -> "L?"
+      in
+      let boot =
+        match (error_prefix, service_prefix, bootstrapped) with
+        | Some err, _, _ -> err
+        | None, Some prefix, _ -> prefix
+        | None, None, Some true -> Widgets.green "synced"
+        | None, None, Some false -> Widgets.yellow "syncing"
+        | None, None, None -> Widgets.dim (Context.render_spinner "")
+      in
+      let age =
+        if stopped then Widgets.dim ""
+        else
+          match last_rpc_refresh with
+          | None -> Widgets.dim ""
+          | Some ts ->
+              let secs = Unix.gettimeofday () -. ts in
+              let label =
+                if secs >= 60. then Printf.sprintf "(%.0fm)" (secs /. 60.)
+                else Printf.sprintf "(%.0fs)" secs
+              in
+              Widgets.dim label
+      in
+      let proto_s =
+        match proto with
+        | None -> Widgets.dim "proto:?"
+        | Some p ->
+            let s =
+              Printf.sprintf
+                "proto:%s"
+                (String.sub p 0 (min 6 (String.length p)))
+            in
+            if stopped then Widgets.dim s else s
+      in
+      let chain_s =
+        match chain_id with
+        | None -> Widgets.dim "chain:?"
+        | Some c ->
+            let s =
+              Printf.sprintf
+                "chain:%s"
+                (String.sub c 0 (min 6 (String.length c)))
+            in
+            if stopped then Widgets.dim s else s
+      in
+      let lvl_s = if stopped then Widgets.dim lvl else lvl in
+      Printf.sprintf "%s · %s · %s · %s %s" boot lvl_s proto_s chain_s age
+
+let network_short (n : string) =
+  match Snapshots.slug_of_network n with Some slug -> slug | None -> n
+
 let line_for_service idx selected (st : Service_state.t) =
   let svc = st.Service_state.service in
   let marker = if idx + 2 = selected then Widgets.bold "➤" else " " in
@@ -153,15 +243,45 @@ let line_for_service idx selected (st : Service_state.t) =
     | "accuser" -> Widgets.magenta padded
     | _ -> padded
   in
-  let instance_str = Printf.sprintf "%-20s" svc.Service.instance in
-  Printf.sprintf
-    "%s %s %s %s %-18s %s"
-    marker
-    status
-    instance_str
-    role_str
-    (History_mode.to_string svc.Service.history_mode)
-    enabled
+  let instance_str = Printf.sprintf "%-16s" svc.Service.instance in
+  let history, network =
+    match svc.Service.role with
+    | "baker" ->
+        (* Bakers inherit network/mode from their node; hide these columns to
+           keep the focus on the instance itself. *)
+        (Printf.sprintf "%-10s" "", Printf.sprintf "%-12s" "")
+    | _ ->
+        ( Printf.sprintf
+            "%-10s"
+            (History_mode.to_string svc.Service.history_mode),
+          Printf.sprintf "%-12s" (network_short svc.Service.network) )
+  in
+  let first_line =
+    Printf.sprintf
+      "%s %s %s %s %s %s %s"
+      marker
+      status
+      instance_str
+      role_str
+      history
+      network
+      enabled
+  in
+  (* Align RPC under the role column visually. We rely on fixed column widths
+     (marker 1 + status 1 + instance 16) with spaces between. *)
+  let role_column_start = 1 + 1 + 1 + 1 + 16 + 1 in
+  let second_line =
+    match svc.Service.role with
+    | "baker" ->
+        let msg = Widgets.dim "RPC not available for bakers; use logs." in
+        Printf.sprintf "%s%s" (String.make role_column_start ' ') msg
+    | _ ->
+        Printf.sprintf
+          "%s%s"
+          (String.make role_column_start ' ')
+          (rpc_status_line ~service_status:st.Service_state.status svc)
+  in
+  String.concat "\n" [first_line; second_line]
 
 let table_lines state =
   let install_row =
@@ -190,11 +310,32 @@ let run_unit_action ~verb ~instance action =
   let title = Printf.sprintf "%s %s" (String.capitalize_ascii verb) instance in
   match action () with
   | Ok () ->
-      Modal_helpers.show_success
-        ~title
-        (Printf.sprintf "%s completed." (String.capitalize_ascii verb)) ;
+      Context.toast_success (Printf.sprintf "%s: %s" instance verb) ;
       Context.mark_instances_dirty ()
-  | Error (`Msg msg) -> Modal_helpers.show_error ~title msg
+  | Error (`Msg msg) ->
+      Context.toast_error (Printf.sprintf "%s: %s failed" instance verb) ;
+      Modal_helpers.show_error ~title msg
+
+(* Long-running actions (snapshot refresh) run asynchronously via Job_manager *)
+let run_async_action ~verb ~instance action =
+  let description =
+    Printf.sprintf "%s %s" (String.capitalize_ascii verb) instance
+  in
+  Context.toast_info (Printf.sprintf "%s: starting %s..." instance verb) ;
+  Job_manager.submit ~description (fun () ->
+      match action () with
+      | Ok () ->
+          Context.toast_success (Printf.sprintf "%s: %s done" instance verb) ;
+          Context.mark_instances_dirty () ;
+          Ok ()
+      | Error (`Msg msg) ->
+          Context.toast_error (Printf.sprintf "%s: %s failed" instance verb) ;
+          Modal_helpers.show_error
+            ~title:
+              (Printf.sprintf "%s %s" (String.capitalize_ascii verb) instance)
+            msg ;
+          Context.mark_instances_dirty () ;
+          Error (`Msg msg))
 
 let require_installer () =
   match
@@ -260,34 +401,92 @@ let view_logs state =
   with_service state (fun svc_state ->
       let svc = svc_state.Service_state.service in
       let title = Printf.sprintf "Logs · %s" svc.Service.instance in
-      match svc.Service.logging_mode with
-      | Logging_mode.Journald ->
-          let unit = Systemd.unit_name svc.Service.role svc.Service.instance in
-          (match Common.run_out (journalctl_args unit) with
-          | Ok text ->
-              Modal_helpers.open_text_modal
-                ~title
-                ~lines:(String.split_on_char '\n' text)
-          | Error (`Msg msg) -> Modal_helpers.show_error ~title msg) ;
-          state
-      | Logging_mode.File {path; _} ->
-          let trimmed = String.trim path in
-          if trimmed = "" then (
-            Modal_helpers.show_error ~title "Log file path is empty" ;
-            state)
-          else if Sys.file_exists trimmed then (
-            match Common.run_out ["tail"; "-n"; "200"; trimmed] with
-            | Ok text ->
-                Modal_helpers.open_text_modal
-                  ~title
-                  ~lines:(String.split_on_char '\n' text) ;
-                state
-            | Error (`Msg msg) ->
-                Modal_helpers.show_error ~title msg ;
+      let open Option in
+      let baker_base_dir () =
+        let env =
+          match Node_env.read ~inst:svc.Service.instance with
+          | Ok pairs -> pairs
+          | Error _ -> []
+        in
+        match List.assoc_opt "OCTEZ_BAKER_BASE_DIR" env with
+        | Some v when String.trim v <> "" -> String.trim v
+        | _ -> Common.default_role_dir "baker" svc.Service.instance
+      in
+      let baker_daily_logs () =
+        let dir = Filename.concat (baker_base_dir ()) "daily_logs" in
+        if Sys.file_exists dir && Sys.is_directory dir then
+          Sys.readdir dir |> Array.to_list
+          |> List.map (Filename.concat dir)
+          |> List.filter Sys.file_exists
+        else []
+      in
+      let latest path_candidates =
+        path_candidates
+        |> List.filter_map (fun p ->
+            try Some ((Unix.stat p).Unix.st_mtime, p) with _ -> None)
+        |> List.sort (fun (a, _) (b, _) -> Float.compare b a)
+        |> function
+        | (_, p) :: _ -> Some p
+        | [] -> None
+      in
+      let tail_file path =
+        match Common.run_out ["tail"; "-n"; "200"; path] with
+        | Ok text ->
+            Modal_helpers.open_text_modal
+              ~title
+              ~lines:(String.split_on_char '\n' text) ;
+            state
+        | Error (`Msg msg) ->
+            Modal_helpers.show_error ~title msg ;
+            state
+      in
+      match svc.Service.role with
+      | "baker" -> (
+          match svc.Service.logging_mode with
+          | Logging_mode.Journald ->
+              let unit =
+                Systemd.unit_name svc.Service.role svc.Service.instance
+              in
+              (match Common.run_out (journalctl_args unit) with
+              | Ok text ->
+                  Modal_helpers.open_text_modal
+                    ~title
+                    ~lines:(String.split_on_char '\n' text)
+              | Error (`Msg msg) -> Modal_helpers.show_error ~title msg) ;
+              state
+          | Logging_mode.File _ -> (
+              (* When file logging is configured for bakers, only the
+                 rotation under daily_logs is reliable. *)
+              let logs = baker_daily_logs () in
+              match latest logs with
+              | Some path -> tail_file path
+              | None ->
+                  Modal_helpers.show_error
+                    ~title
+                    "No baker daily logs found under base_dir/daily_logs." ;
+                  state))
+      | _ -> (
+          match svc.Service.logging_mode with
+          | Logging_mode.Journald ->
+              let unit =
+                Systemd.unit_name svc.Service.role svc.Service.instance
+              in
+              (match Common.run_out (journalctl_args unit) with
+              | Ok text ->
+                  Modal_helpers.open_text_modal
+                    ~title
+                    ~lines:(String.split_on_char '\n' text)
+              | Error (`Msg msg) -> Modal_helpers.show_error ~title msg) ;
+              state
+          | Logging_mode.File {path; _} ->
+              let trimmed = String.trim path in
+              if trimmed = "" then (
+                Modal_helpers.show_error ~title "Log file path is empty" ;
                 state)
-          else (
-            Modal_helpers.show_error ~title "Log file does not exist" ;
-            state))
+              else if Sys.file_exists trimmed then tail_file trimmed
+              else (
+                Modal_helpers.show_error ~title "Log file does not exist" ;
+                state)))
 
 let refresh_modal state =
   with_service state (fun svc_state ->
@@ -302,7 +501,23 @@ let refresh_modal state =
         ~on_select:(fun choice ->
           let instance = svc.Service.instance in
           let run_refresh ?snapshot_uri ?(no_check = false) () =
-            run_unit_action ~verb:"refresh" ~instance (fun () ->
+            let now = Unix.gettimeofday () in
+            Rpc_metrics.set
+              ~instance
+              {
+                Rpc_metrics.chain_id = None;
+                head_level = None;
+                bootstrapped = None;
+                last_rpc_refresh = Some now;
+                node_version = None;
+                data_size = None;
+                proto = None;
+                last_error = None;
+              } ;
+            Context.mark_instances_dirty () ;
+            (* Stop RPC monitor while refreshing to avoid stale connections *)
+            Rpc_scheduler.stop_head_monitor instance ;
+            run_async_action ~verb:"refresh" ~instance (fun () ->
                 let* (module NM) = require_tezos_node_manager () in
                 NM.refresh_instance_from_snapshot
                   ~instance
@@ -541,8 +756,17 @@ struct
     ]
 
   let view s ~focus:_ ~size =
+    (* Tick spinner and toasts each render *)
+    Context.tick_spinner () ;
+    Context.tick_toasts () ;
     let body = String.concat "\n" (table_lines s) in
-    Vsection.render ~size ~header:(header s) ~footer ~child:(fun _ -> body)
+    let cols = size.LTerm_geom.cols in
+    let toast_lines = Context.render_toasts ~cols in
+    let body_with_toasts =
+      if String.length toast_lines > 0 then body ^ "\n" ^ toast_lines else body
+    in
+    Vsection.render ~size ~header:(header s) ~footer ~child:(fun _ ->
+        body_with_toasts)
 
   let check_navigation s =
     match Context.consume_navigation () with
@@ -552,6 +776,11 @@ struct
   let handle_modal_key s key ~size:_ =
     Miaou.Core.Modal_manager.handle_key key ;
     check_navigation s
+
+  let is_quit_key key =
+    let lower = String.lowercase_ascii key in
+    lower = "esc" || lower = "escape" || lower = "c-c" || lower = "ctrl+c"
+    || lower = "^c" || String.equal key "\003"
 
   let move_selection s delta =
     if s.filtered = [] then {s with selected = 0}
@@ -569,6 +798,7 @@ struct
       if Miaou.Core.Modal_manager.has_active () then (
         Miaou.Core.Modal_manager.handle_key key ;
         s)
+      else if is_quit_key key then {s with next_page = Some "__BACK__"}
       else
         match Keys.of_string key with
         | Some Keys.Up -> move_selection s (-1)
@@ -582,7 +812,10 @@ struct
         | Some (Keys.Char " ") -> force_refresh_cmd s
         | Some (Keys.Char "r") -> force_refresh_cmd s
         | Some (Keys.Char "R") -> refresh_modal s
-        | Some (Keys.Char "Esc") | Some (Keys.Char "q") ->
+        | Some (Keys.Char "Esc")
+        | Some (Keys.Char "Escape")
+        | Some (Keys.Char "q")
+        | Some (Keys.Char "C-c") ->
             {s with next_page = Some "__BACK__"}
         | _ -> s
     in

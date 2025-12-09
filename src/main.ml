@@ -482,8 +482,10 @@ let install_baker_cmd =
             node_instance;
             node_data_dir;
             node_endpoint;
+            node_mode = `Auto;
             base_dir;
             delegates;
+            dal_endpoint = None;
             extra_args;
             service_user;
             app_bin_dir;

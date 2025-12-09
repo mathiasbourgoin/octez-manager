@@ -840,6 +840,113 @@ let binary_help_parses_options () =
     (Binary_help_explorer.For_tests.arg_kind_to_string history_mode.kind
     = "text")
 
+let baker_local_help =
+  {|
+Usage:
+  octez-baker [global options] command [command options]
+
+Global options (must come before the command):
+  -d --base-dir <path>: client data directory (absent: TEZOS_CLIENT_DIR env)
+  -E --endpoint <uri>: HTTP(S) endpoint of the node RPC interface; e.g. 'http://localhost:8732'
+  --chain <hash|tag>: chain on which to apply contextual commands
+  -R --remote-signer <uri>: URI of the remote signer
+
+Commands related to the agnostic baker daemon.:
+
+  run with local node <node_data_path> [<baker>...]
+    Launch the baker daemon
+    -P --pidfile <filename>: write process id in file
+    --node-version-check-bypass: If node-version-check-bypass flag is set
+    --node-version-allowed <<product>-[v]<major>.<minor>[.0]<info>[:<commit>]>
+    --minimal-fees <amount>: exclude operations with fees lower than this threshold (in tez)
+    --liquidity-baking-toggle-vote <vote>: Vote to continue or end the liquidity baking subsidy.
+    --adaptive-issuance-vote <vote>: Vote to adopt or not the adaptive issuance feature.
+    --operations-pool <file|uri>: When specified, the baker will try to fetch operations from this file (or uri)
+    --dal-node <uri>: endpoint of the DAL node, e.g. 'http://localhost:8933'
+|}
+
+let baker_remote_help =
+  {|
+Usage:
+  octez-baker [global options] command [command options]
+
+Global options (must come before the command):
+  -d --base-dir <path>: client data directory (absent: TEZOS_CLIENT_DIR env)
+  -E --endpoint <uri>: HTTP(S) endpoint of the node RPC interface; e.g. 'http://localhost:8732'
+
+Commands related to the agnostic baker daemon.:
+
+  run remotely [<baker>...]
+    Launch the baker daemon using RPCs only.
+    --node-version-check-bypass: If node-version-check-bypass flag is set
+    --node-version-allowed <<product>-[v]<major>.<minor>[.0]<info>[:<commit>]>
+    --minimal-fees <amount>: exclude operations with fees lower than this threshold (in tez)
+    --operations-pool <file|uri>: When specified, the baker will try to fetch operations from this file (or uri)
+    --dal-node <uri>: endpoint of the DAL node, e.g. 'http://localhost:8933'
+    --without-dal: If without-dal flag is set, the daemon will not try to connect to a DAL node.
+|}
+
+let baker_help_parses_local () =
+  let opts = Binary_help_explorer.For_tests.parse_baker_help baker_local_help in
+  Alcotest.(check bool) "has options" true (List.length opts > 5) ;
+  let find name =
+    List.find_opt
+      (fun o -> List.exists (( = ) name) o.Binary_help_explorer.names)
+      opts
+    |> Option.get
+  in
+  let base_dir = find "--base-dir" in
+  Alcotest.(check bool)
+    "base-dir kind dir"
+    true
+    (Binary_help_explorer.For_tests.arg_kind_to_string base_dir.kind = "dir") ;
+  let dal_node = find "--dal-node" in
+  Alcotest.(check bool)
+    "dal-node kind addr/text"
+    true
+    (List.mem
+       (Binary_help_explorer.For_tests.arg_kind_to_string dal_node.kind)
+       ["addr"; "addr_port"; "text"]) ;
+  let ops_pool = find "--operations-pool" in
+  Alcotest.(check bool)
+    "operations-pool arg"
+    true
+    (ops_pool.Binary_help_explorer.arg = Some "<file|uri>") ;
+  Alcotest.(check bool)
+    "operations-pool doc"
+    true
+    (string_contains
+       ~needle:"fetch operations from this file"
+       ops_pool.Binary_help_explorer.doc)
+
+let baker_help_parses_remote () =
+  let opts =
+    Binary_help_explorer.For_tests.parse_baker_help baker_remote_help
+  in
+  Alcotest.(check bool) "has options" true (List.length opts > 5) ;
+  let has name =
+    List.exists
+      (fun o -> List.exists (( = ) name) o.Binary_help_explorer.names)
+      opts
+  in
+  Alcotest.(check bool) "has base-dir" true (has "--base-dir") ;
+  Alcotest.(check bool) "has endpoint" true (has "--endpoint") ;
+  Alcotest.(check bool) "has without-dal" true (has "--without-dal")
+
+let parse_help_skips_dividers () =
+  let sample =
+    {|
+------
+  -a --alpha <foo>: first
+------
+  -b --bravo: second
+|}
+  in
+  let opts = Binary_help_explorer.For_tests.parse_help sample in
+  Alcotest.(check int) "only options" 2 (List.length opts) ;
+  let names = List.map (fun o -> List.hd o.Binary_help_explorer.names) opts in
+  Alcotest.(check (list string)) "names" ["-a"; "-b"] names
+
 let service_json_roundtrip () =
   let logging_mode =
     Logging_mode.File {path = "/tmp/octez.log"; rotate = true}
@@ -1216,6 +1323,68 @@ let snapshots_list_missing_entries_error () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "expected missing entry error")
 
+let snapshots_list_disappeared_entry_error () =
+  let root_html = "<a href=\"/seoulnet/rolling.html\">Rolling</a>" in
+  let fetch url =
+    if String.equal url snapshot_root then Ok (200, root_html)
+    else Ok (404, "missing")
+  in
+  Snapshots.For_tests.with_fetch fetch (fun () ->
+      match Snapshots.list ~network_slug:"seoulnet" with
+      | Error (`Msg msg) ->
+          if String.starts_with ~prefix:"Snapshot 'rolling' disappeared" msg
+          then ()
+          else Alcotest.failf "unexpected message: %s" msg
+      | Ok _ -> Alcotest.fail "expected disappeared entry error")
+
+let snapshots_list_no_advertised () =
+  let fetch url =
+    if String.equal url snapshot_root then Error (`Msg "offline root")
+    else Ok (404, "missing")
+  in
+  Snapshots.For_tests.with_fetch fetch (fun () ->
+      match Snapshots.list ~network_slug:"seoulnet" with
+      | Error (`Msg msg) ->
+          if
+            String.starts_with
+              ~prefix:"No snapshots advertised for network 'seoulnet'"
+              msg
+          then ()
+          else Alcotest.failf "unexpected message: %s" msg
+      | Ok _ -> Alcotest.fail "expected no snapshots error")
+
+let snapshots_fetch_html_fallback_to_curl () =
+  let eio_called = ref 0 in
+  let curl_called = ref 0 in
+  let result =
+    Snapshots.For_tests.fetch_html_with
+      ~try_eio:(fun () ->
+        incr eio_called ;
+        Error (`Msg "io_uring unavailable"))
+      ~try_curl:(fun () ->
+        incr curl_called ;
+        Ok (200, "curl-body"))
+  in
+  Alcotest.(check int) "eio attempted" 1 !eio_called ;
+  Alcotest.(check int) "curl used" 1 !curl_called ;
+  match result with
+  | Ok (200, body) -> Alcotest.(check string) "curl body" "curl-body" body
+  | _ -> Alcotest.fail "expected curl fallback success"
+
+let snapshots_fetch_html_prefers_eio () =
+  let curl_called = ref 0 in
+  let result =
+    Snapshots.For_tests.fetch_html_with
+      ~try_eio:(fun () -> Ok (200, "eio-body"))
+      ~try_curl:(fun () ->
+        incr curl_called ;
+        Ok (503, "curl-body"))
+  in
+  Alcotest.(check int) "no curl when eio succeeds" 0 !curl_called ;
+  match result with
+  | Ok (200, body) -> Alcotest.(check string) "body" "eio-body" body
+  | _ -> Alcotest.fail "expected eio result"
+
 let teztnets_parse_pairs_basic () =
   let json =
     "{\n\
@@ -1325,6 +1494,75 @@ let teztnets_list_networks_fallback_fetch () =
       in
       Alcotest.(check list_pairs) "fallback" Teztnets.fallback_pairs pairs
   | Error (`Msg msg) -> Alcotest.failf "fallback error: %s" msg
+
+let teztnets_list_networks_empty_json_fallback () =
+  match Teztnets.list_networks ~fetch:(fun () -> Ok "{}") () with
+  | Ok infos ->
+      let pairs =
+        List.map
+          (fun (n : Teztnets.network_info) ->
+            (Option.value ~default:n.alias n.human_name, n.network_url))
+          infos
+      in
+      Alcotest.(check list_pairs) "fallback" Teztnets.fallback_pairs pairs
+  | Error (`Msg msg) -> Alcotest.failf "empty json fallback error: %s" msg
+
+let teztnets_parse_top_level_list () =
+  let json =
+    "[\n\
+     {\"name\": \"Alpha\", \"network_config_url\": \"https://example/a.json\", \
+     \"description\": \"Desc\"},\n\
+     {\"slug\": \"beta\", \"networkURL\": \"https://example/b.json\", \
+     \"category\": \"Test\"}\n\
+     ]"
+  in
+  match Teztnets.parse_networks json with
+  | Ok infos ->
+      let pairs =
+        List.map
+          (fun (n : Teztnets.network_info) ->
+            (Option.value ~default:n.alias n.human_name, n.network_url))
+          infos
+      in
+      Alcotest.(check list_pairs)
+        "top-level list"
+        [
+          ("Alpha", "https://example/a.json"); ("beta", "https://example/b.json");
+        ]
+        pairs
+  | Error (`Msg msg) -> Alcotest.failf "parse top-level list error: %s" msg
+
+let teztnets_fetch_json_fallback_to_curl () =
+  let eio_called = ref 0 in
+  let curl_called = ref 0 in
+  let result =
+    Teztnets.For_tests.fetch_json_with
+      ~via_eio:(fun () ->
+        incr eio_called ;
+        Error (`Msg "eio failed"))
+      ~via_curl:(fun () ->
+        incr curl_called ;
+        Ok "{\"nets\":[]}")
+  in
+  Alcotest.(check int) "eio attempt" 1 !eio_called ;
+  Alcotest.(check int) "curl attempt" 1 !curl_called ;
+  match result with
+  | Ok body -> Alcotest.(check string) "body" "{\"nets\":[]}" body
+  | Error (`Msg msg) -> Alcotest.failf "expected curl success: %s" msg
+
+let teztnets_fetch_json_prefers_eio () =
+  let curl_called = ref 0 in
+  let result =
+    Teztnets.For_tests.fetch_json_with
+      ~via_eio:(fun () -> Ok "{\"nets\":[1]}")
+      ~via_curl:(fun () ->
+        incr curl_called ;
+        Ok "{}")
+  in
+  Alcotest.(check int) "no curl when eio ok" 0 !curl_called ;
+  match result with
+  | Ok body -> Alcotest.(check string) "body" "{\"nets\":[1]}" body
+  | Error (`Msg msg) -> Alcotest.failf "expected eio body: %s" msg
 
 let service_registry_list_empty () =
   with_fake_xdg (fun _env ->
@@ -1765,6 +2003,86 @@ let job_manager_submit_and_list () =
   (* But we verified submission works. *)
   ()
 
+let background_runner_enqueue_sync () =
+  let module BR = Octez_manager_ui.Background_runner in
+  let did_run = ref false in
+  BR.For_tests.with_synchronous_runner (fun () ->
+      BR.enqueue (fun () -> did_run := true)) ;
+  Alcotest.(check bool) "task ran" true !did_run
+
+let background_runner_submit_on_complete () =
+  let module BR = Octez_manager_ui.Background_runner in
+  let ran = ref false in
+  let completed = ref false in
+  BR.For_tests.with_synchronous_runner (fun () ->
+      BR.submit_blocking
+        ~on_complete:(fun () -> completed := true)
+        (fun () -> ran := true)) ;
+  Alcotest.(check bool) "ran" true !ran ;
+  Alcotest.(check bool) "on_complete" true !completed
+
+let rpc_scheduler_schedule_cap_and_spacing () =
+  let module RS = Octez_manager_ui.Rpc_scheduler in
+  let submits = ref 0 in
+  let executed = ref [] in
+  RS.For_tests.reset_state () ;
+  RS.For_tests.set_bg_cap 1 ;
+  RS.For_tests.set_last_global_rpc (-10.0) ;
+  let submit_stub ?on_complete f =
+    incr submits ;
+    f () ;
+    Option.iter (fun g -> g ()) on_complete
+  in
+  let now_stub () = float_of_int !submits in
+  let svc = {(sample_service ()) with Service.instance = "node1"} in
+  let poll_stub svc now =
+    executed := (svc.Service.instance, now) :: !executed
+  in
+  RS.For_tests.with_submit_blocking submit_stub (fun () ->
+      RS.For_tests.with_now now_stub (fun () ->
+          RS.For_tests.with_poll_boot poll_stub (fun () ->
+              RS.For_tests.dispatch [svc]))) ;
+  Alcotest.(check int) "submitted once" 1 !submits ;
+  Alcotest.(check int) "executed once" 1 (List.length !executed) ;
+  match !executed with
+  | [(inst, _now)] -> Alcotest.(check string) "instance" "node1" inst
+  | _ -> Alcotest.fail "unexpected execution list"
+
+let rpc_scheduler_respects_min_spacing () =
+  let module RS = Octez_manager_ui.Rpc_scheduler in
+  let submits = ref 0 in
+  let executed = ref [] in
+  RS.For_tests.reset_state () ;
+  RS.For_tests.set_bg_cap 4 ;
+  RS.For_tests.with_submit_blocking
+    (fun ?on_complete f ->
+      incr submits ;
+      f () ;
+      Option.iter (fun g -> g ()) on_complete)
+    (fun () ->
+      RS.For_tests.set_last_global_rpc (-10.0) ;
+      let times = ref [0.0; 1.2; 1.8] in
+      RS.For_tests.with_now
+        (fun () ->
+          match !times with
+          | t :: rest ->
+              times := rest ;
+              t
+          | [] -> 999.0)
+        (fun () ->
+          let mk instance = {(sample_service ()) with Service.instance} in
+          let svc1 = mk "node1" in
+          let svc2 = mk "node2" in
+          let svc3 = mk "node3" in
+          RS.For_tests.with_poll_boot
+            (fun svc now ->
+              executed := (svc.Service.instance, now) :: !executed)
+            (fun () -> RS.For_tests.dispatch [svc1; svc2; svc3]))) ;
+  (* min_spacing=1.0 so first at t=0.0, second at t=1.2, third skipped because 1.8 - 1.2 < 1.0 *)
+  Alcotest.(check int) "submitted twice" 2 !submits ;
+  let insts = List.map fst !executed |> List.rev in
+  Alcotest.(check (list string)) "order" ["node1"; "node2"] insts
+
 let () =
   Alcotest.run
     "octez-manager"
@@ -1776,7 +2094,25 @@ let () =
         ] );
       ("settings", [Alcotest.test_case "roundtrip" `Quick settings_roundtrip]);
       ( "job_manager",
-        [Alcotest.test_case "submit" `Quick job_manager_submit_and_list] );
+        [
+          Alcotest.test_case "submit" `Quick job_manager_submit_and_list;
+          Alcotest.test_case
+            "enqueue sync"
+            `Quick
+            background_runner_enqueue_sync;
+          Alcotest.test_case
+            "submit on_complete"
+            `Quick
+            background_runner_submit_on_complete;
+          Alcotest.test_case
+            "rpc_scheduler cap"
+            `Quick
+            rpc_scheduler_schedule_cap_and_spacing;
+          Alcotest.test_case
+            "rpc_scheduler spacing"
+            `Quick
+            rpc_scheduler_respects_min_spacing;
+        ] );
       ( "common.env",
         [
           Alcotest.test_case "home_dir" `Quick home_dir_fallback;
@@ -1822,6 +2158,22 @@ let () =
             "list missing entry error"
             `Quick
             snapshots_list_missing_entries_error;
+          Alcotest.test_case
+            "list disappeared entry"
+            `Quick
+            snapshots_list_disappeared_entry_error;
+          Alcotest.test_case
+            "list no advertised"
+            `Quick
+            snapshots_list_no_advertised;
+          Alcotest.test_case
+            "fetch_html fallback"
+            `Quick
+            snapshots_fetch_html_fallback_to_curl;
+          Alcotest.test_case
+            "fetch_html prefers eio"
+            `Quick
+            snapshots_fetch_html_prefers_eio;
         ] );
       ( "teztnets",
         [
@@ -1843,6 +2195,22 @@ let () =
             "list fallback"
             `Quick
             teztnets_list_networks_fallback_fetch;
+          Alcotest.test_case
+            "list empty json fallback"
+            `Quick
+            teztnets_list_networks_empty_json_fallback;
+          Alcotest.test_case
+            "fetch_json fallback"
+            `Quick
+            teztnets_fetch_json_fallback_to_curl;
+          Alcotest.test_case
+            "fetch_json prefers eio"
+            `Quick
+            teztnets_fetch_json_prefers_eio;
+          Alcotest.test_case
+            "parse top-level list"
+            `Quick
+            teztnets_parse_top_level_list;
         ] );
       ( "logging_mode",
         [
@@ -1908,6 +2276,18 @@ let () =
             "binary help parses"
             `Quick
             binary_help_parses_options;
+          Alcotest.test_case
+            "help skips dividers"
+            `Quick
+            parse_help_skips_dividers;
+          Alcotest.test_case
+            "baker help parses local"
+            `Quick
+            baker_help_parses_local;
+          Alcotest.test_case
+            "baker help parses remote"
+            `Quick
+            baker_help_parses_remote;
         ] );
       ( "service.core",
         [

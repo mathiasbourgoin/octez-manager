@@ -38,7 +38,12 @@ let systemctl_cmd () =
 let run_systemctl args = Common.run (systemctl_cmd () @ args)
 
 let run_systemctl_timeout args =
-  Common.run (("timeout" :: "5s" :: systemctl_cmd ()) @ args)
+  (* Keep systemctl calls bounded to avoid UI stalls. Shorten to 2s. *)
+  Common.run (("timeout" :: "2s" :: systemctl_cmd ()) @ args)
+
+let run_systemctl_out_timeout args =
+  (* Keep systemctl calls bounded to avoid UI stalls. Shorten to 2s. *)
+  Common.run_out (("timeout" :: "2s" :: systemctl_cmd ()) @ args)
 
 let run_systemctl_out args = Common.run_out (systemctl_cmd () @ args)
 
@@ -46,14 +51,17 @@ let cat_unit ~role ~instance =
   run_systemctl_out ["cat"; unit_name role instance]
 
 let status ~role ~instance =
-  run_systemctl_out ["status"; "--no-pager"; unit_name role instance]
+  (* systemctl can hang if the user bus is unavailable; cap to 5s. *)
+  run_systemctl_out_timeout ["status"; "--no-pager"; unit_name role instance]
 
 let is_enabled ~role ~instance =
-  run_systemctl_out ["is-enabled"; unit_name role instance]
+  (* Cap to 5s to avoid blocking the UI on systemd hiccups. *)
+  run_systemctl_out_timeout ["is-enabled"; unit_name role instance]
 
 let is_active ~role ~instance =
   let unit = unit_name role instance in
-  match run_systemctl_out ["show"; "--property=ActiveState"; unit] with
+  (* Cap to 5s to avoid hangs when the user bus/systemd is slow or unavailable. *)
+  match run_systemctl_out_timeout ["show"; "--property=ActiveState"; unit] with
   | Ok line ->
       let state =
         match String.split_on_char '=' line with
@@ -73,9 +81,15 @@ let env_file_template user_mode =
 let exec_line role =
   match String.lowercase_ascii role with
   | "baker" ->
-      "ExecStart=/bin/sh -lc 'exec \"${APP_BIN_DIR}/octez-baker\" --base-dir \
-       \"${OCTEZ_BAKER_BASE_DIR}\" --endpoint \"${OCTEZ_NODE_ENDPOINT}\" run \
-       with local node \"${OCTEZ_DATA_DIR}\" ${OCTEZ_BAKER_DELEGATES_ARGS:-}'"
+      "ExecStart=/bin/sh -lc 'MODE=${OCTEZ_BAKER_NODE_MODE:-local}; \
+       CMD=\"${APP_BIN_DIR}/octez-baker\"; CMD=\"$CMD --base-dir \
+       \\\"${OCTEZ_BAKER_BASE_DIR}\\\" --endpoint \
+       \\\"${OCTEZ_NODE_ENDPOINT}\\\"\"; if [ \"$MODE\" = \"remote\" ]; then \
+       CMD=\"$CMD run with remote node \\\"${OCTEZ_NODE_ENDPOINT}\\\"\"; else \
+       CMD=\"$CMD run with local node \\\"${OCTEZ_DATA_DIR}\\\"\"; fi; if [ -n \
+       \"${OCTEZ_DAL_ENDPOINT:-}\" ]; then CMD=\"$CMD --dal-node \
+       \\\"${OCTEZ_DAL_ENDPOINT}\\\"\"; fi; exec $CMD \
+       ${OCTEZ_BAKER_DELEGATES_ARGS:-} ${OCTEZ_BAKER_EXTRA_ARGS:-}'"
   | "node" ->
       "ExecStart=/bin/sh -lc 'exec \"${APP_BIN_DIR}/octez-node\" run \
        --data-dir=\"${OCTEZ_DATA_DIR}\" ${OCTEZ_NODE_ARGS:-}'"

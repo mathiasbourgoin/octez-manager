@@ -758,22 +758,37 @@ let install_baker (request : baker_request) =
         let* svc = lookup_node_service inst in
         Ok (Some svc)
   in
-  let* node_data_dir =
-    match (node_service_opt, request.node_data_dir) with
-    | Some svc, _ -> Ok svc.Service.data_dir
-    | None, Some dir when String.trim dir <> "" -> Ok dir
-    | None, _ ->
-        R.error_msg
-          "--node-data-dir is required when --node-instance is not provided"
+  let resolved_node_mode =
+    match request.node_mode with
+    | `Local -> `Local
+    | `Remote -> `Remote
+    | `Auto -> (
+        match node_service_opt with
+        | Some _ -> `Local
+        | None -> (
+            match request.node_data_dir with
+            | Some dir when String.trim dir <> "" -> `Local
+            | _ -> `Remote))
   in
-  let node_data_dir =
-    let trimmed = String.trim node_data_dir in
-    if trimmed = "" then None else Some trimmed
+  let* node_data_dir_opt =
+    match resolved_node_mode with
+    | `Remote -> Ok None
+    | `Local -> (
+        match (node_service_opt, request.node_data_dir) with
+        | Some svc, _ -> Ok (Some svc.Service.data_dir)
+        | None, Some dir when String.trim dir <> "" -> Ok (Some dir)
+        | None, _ ->
+            R.error_msg "--node-data-dir is required when using a local node")
   in
-  let* node_data_dir =
-    match node_data_dir with
-    | Some dir -> Ok dir
-    | None -> R.error_msg "Resolved node data directory is empty"
+  let node_data_dir_opt =
+    match node_data_dir_opt with
+    | Some dir when String.trim dir <> "" -> Some (String.trim dir)
+    | _ -> None
+  in
+  let data_dir_for_service =
+    match node_data_dir_opt with
+    | Some dir -> dir
+    | None -> Common.default_role_dir "baker" request.instance ^ "/remote-node"
   in
   let network =
     match (request.network, node_service_opt) with
@@ -799,19 +814,26 @@ let install_baker (request : baker_request) =
     | Some dir when String.trim dir <> "" -> dir
     | _ -> Common.default_role_dir "baker" request.instance
   in
+  let dal_endpoint =
+    match request.dal_endpoint with
+    | Some ep when String.trim ep <> "" -> Some (endpoint_of_rpc ep)
+    | _ -> None
+  in
+  let node_mode_env =
+    match resolved_node_mode with `Local -> "local" | `Remote -> "remote"
+  in
   let delegate_flags =
     request.delegates |> List.concat_map (fun d -> ["--delegate"; d])
   in
-  let baker_args =
-    String.concat " " (delegate_flags @ request.extra_args) |> String.trim
-  in
+  let delegate_args = String.concat " " delegate_flags |> String.trim in
+  let extra_args_str = String.concat " " request.extra_args |> String.trim in
   install_daemon
     {
       role = "baker";
       instance = request.instance;
       network;
       history_mode;
-      data_dir = node_data_dir;
+      data_dir = data_dir_for_service;
       rpc_addr = node_endpoint;
       net_addr = "";
       service_user = request.service_user;
@@ -822,7 +844,12 @@ let install_baker (request : baker_request) =
         [
           ("OCTEZ_BAKER_BASE_DIR", base_dir);
           ("OCTEZ_NODE_ENDPOINT", node_endpoint);
-          ("OCTEZ_BAKER_DELEGATES_ARGS", baker_args);
+          ("OCTEZ_BAKER_NODE_MODE", node_mode_env);
+          ( "OCTEZ_DAL_ENDPOINT",
+            match dal_endpoint with Some ep -> ep | None -> "" );
+          ("OCTEZ_BAKER_DELEGATES_ARGS", delegate_args);
+          ("OCTEZ_BAKER_DELEGATES_CSV", String.concat "," request.delegates);
+          ("OCTEZ_BAKER_EXTRA_ARGS", extra_args_str);
         ];
       extra_paths = [base_dir];
       auto_enable = request.auto_enable;

@@ -51,6 +51,12 @@ let primary_name names =
   | Some long -> long
   | None -> ( match names with h :: _ -> h | [] -> "")
 
+let display_names names =
+  let longs =
+    List.filter (fun n -> String.length n > 2 && String.sub n 0 2 = "--") names
+  in
+  if longs = [] then names else longs
+
 let trim_nonempty s =
   let t = String.trim s in
   if t = "" then None else Some t
@@ -90,7 +96,7 @@ let classify_arg_kind ~names ~arg ~doc =
       else if has "int" || has "num" || has "number" then Value Number
       else Value Text
 
-let split_spec_doc raw_line =
+let split_spec_doc_default raw_line =
   let line = String.trim raw_line in
   let len = String.length line in
   let rec find_gap idx =
@@ -106,6 +112,26 @@ let split_spec_doc raw_line =
         String.sub line (idx + gap) (len - (idx + gap)) |> String.trim )
   | None -> (String.trim line, "")
 
+(* Clap outputs often use ": " instead of aligned double spaces; fall back to
+   splitting on the first occurrence of ": " when tabs/double-spaces are
+   absent. *)
+let split_spec_doc_baker raw_line =
+  let line = String.trim raw_line in
+  match split_spec_doc_default raw_line with
+  | spec, doc when doc <> "" -> (spec, doc)
+  | _ -> (
+      match String.index_opt line ':' with
+      | None -> (line, "")
+      | Some idx ->
+          if idx + 1 < String.length line && line.[idx + 1] = ' ' then
+            let spec = String.sub line 0 idx |> String.trim in
+            let doc =
+              String.sub line (idx + 1) (String.length line - idx - 1)
+              |> String.trim
+            in
+            (spec, doc)
+          else (line, ""))
+
 let clean_placeholder s =
   let trimmed = String.trim s in
   let len = String.length trimmed in
@@ -120,6 +146,18 @@ let clean_placeholder s =
     in
     let stop = drop_trailing len in
     String.sub trimmed 0 stop
+
+let clean_name name =
+  let trimmed = String.trim name in
+  let len = String.length trimmed in
+  let rec drop_trailing i =
+    if i <= 0 then 0
+    else
+      match trimmed.[i - 1] with
+      | ':' | ';' | ',' -> drop_trailing (i - 1)
+      | _ -> i
+  in
+  String.sub trimmed 0 (drop_trailing len)
 
 let parse_spec spec =
   let tokens =
@@ -142,7 +180,7 @@ let parse_spec spec =
                 in
                 (name, Some placeholder)
           in
-          ( name :: names,
+          ( clean_name name :: names,
             match inline_arg with None -> args | Some a -> a :: args )
         else (names, tok :: args))
       ([], [])
@@ -158,9 +196,13 @@ let parse_spec spec =
 (* Check if a line looks like an option definition line from --help output.
    Option lines start with - and have at most one or two option names.
    Example/command lines often have multiple --flags and should be rejected. *)
-let is_option_line line =
+let is_option_line_node line =
   let trimmed = String.trim line in
-  if trimmed = "" || trimmed.[0] <> '-' then false
+  if
+    trimmed = ""
+    || trimmed.[0] <> '-'
+    || String.for_all (fun c -> c = '-') trimmed
+  then false
   else
     (* Count occurrences of " --" which indicates multiple flags on one line
        (typical of example command lines, not option definitions) *)
@@ -176,6 +218,30 @@ let is_option_line line =
     in
     (* Real option lines have at most one " --" (for alternate names like "-d, --data-dir")
        Example lines like "--data-dir /foo --rpc-addr bar" have multiple *)
+    double_dash_count <= 1
+
+let is_option_line_baker line =
+  let trimmed = String.trim line in
+  if
+    trimmed = ""
+    || trimmed.[0] <> '-'
+    || String.for_all (fun c -> c = '-') trimmed
+    || not (String.contains trimmed ' ')
+  then false
+  else
+    (* Avoid example lines containing multiple flags. Clap-style lines usually
+       present a single flag and its doc; we still allow alternate names like
+       "-d, --data-dir". *)
+    let double_dash_count =
+      let rec count acc i =
+        if i >= String.length trimmed - 2 then acc
+        else if
+          trimmed.[i] = ' ' && trimmed.[i + 1] = '-' && trimmed.[i + 2] = '-'
+        then count (acc + 1) (i + 3)
+        else count acc (i + 1)
+      in
+      count 0 0
+    in
     double_dash_count <= 1
 
 let strip_ansi s =
@@ -203,7 +269,7 @@ let strip_ansi s =
   loop 0 ;
   Buffer.contents buf
 
-let parse_help output =
+let parse_help_with ~is_option_line ~split_spec_doc output =
   let lines = String.split_on_char '\n' output in
   let finalize current acc =
     match current with None -> acc | Some r -> r :: acc
@@ -247,6 +313,16 @@ let parse_help output =
   in
   loop [] None lines
 
+let parse_help_node =
+  parse_help_with
+    ~is_option_line:is_option_line_node
+    ~split_spec_doc:split_spec_doc_default
+
+let parse_help_baker =
+  parse_help_with
+    ~is_option_line:is_option_line_baker
+    ~split_spec_doc:split_spec_doc_baker
+
 let run_help binary =
   if not (Sys.file_exists binary) then
     Error (`Msg (Printf.sprintf "Binary not found at %s" binary))
@@ -262,13 +338,20 @@ let run_help binary =
         "--help=plain";
       ]
 
+let run_help_cmd binary cmd =
+  if not (Sys.file_exists binary) then
+    Error (`Msg (Printf.sprintf "Binary not found at %s" binary))
+  else
+    Common.run_out
+      (["env"; "MANPAGER=cat"; "PAGER=cat"; "TERM=dumb"; binary] @ cmd)
+
 let load_options ~binary =
   match Hashtbl.find_opt cache binary with
   | Some opts -> Ok opts
   | None ->
       let* output = run_help binary in
       let output = strip_ansi output in
-      let opts = parse_help output in
+      let opts = parse_help_node output in
       if opts = [] then Error (`Msg "No options parsed from help output")
       else (
         Hashtbl.replace cache binary opts ;
@@ -279,11 +362,11 @@ let render_value = function None -> "" | Some v -> v
 let truncate ~max_len s =
   if String.length s <= max_len then s else String.sub s 0 (max_len - 1) ^ "…"
 
-let option_label entry = String.concat ", " entry.names
+let option_label entry = String.concat ", " (display_names entry.names)
 
 let option_hint_markdown (row : row) : string option * string option =
   let names_md =
-    row.opt.names
+    row.opt.names |> display_names
     |> List.map (fun n -> Printf.sprintf "`%s`" n)
     |> String.concat ", "
   in
@@ -293,9 +376,7 @@ let option_hint_markdown (row : row) : string option * string option =
     | Some arg -> Printf.sprintf "### %s `%s`" names_md arg
   in
   let doc = String.trim row.opt.doc in
-  let doc_lines =
-    if doc = "" then [] else String.split_on_char '\n' doc
-  in
+  let doc_lines = if doc = "" then [] else String.split_on_char '\n' doc in
   let selection_lines =
     if not row.selected then []
     else
@@ -307,7 +388,9 @@ let option_hint_markdown (row : row) : string option * string option =
   let long_lines =
     [heading]
     @ (if doc_lines = [] then [] else [""; String.concat "\n" doc_lines])
-    @ (if selection_lines = [] then [] else [""; String.concat "\n" selection_lines])
+    @
+    if selection_lines = [] then []
+    else [""; String.concat "\n" selection_lines]
   in
   let long =
     match List.filter (fun l -> String.trim l <> "") long_lines with
@@ -317,11 +400,19 @@ let option_hint_markdown (row : row) : string option * string option =
   let short =
     match doc_lines with
     | first :: _ when String.trim first <> "" ->
-        Some (Printf.sprintf "**%s** — %s" (option_label row.opt) (String.trim first))
+        Some
+          (Printf.sprintf
+             "**%s** — %s"
+             (option_label row.opt)
+             (String.trim first))
     | _ -> (
         match selection_lines with
         | first :: _ ->
-            Some (Printf.sprintf "**%s** — %s" (option_label row.opt) (String.trim first))
+            Some
+              (Printf.sprintf
+                 "**%s** — %s"
+                 (option_label row.opt)
+                 (String.trim first))
         | [] -> None)
   in
   (short, long)
@@ -759,8 +850,12 @@ let open_modal ~title ~options ~on_apply =
     ~init:(Modal.init ())
     ~ui
     ~commit_on:[]
-    ~cancel_on:["Esc"; "q"; "Q"]
-    ~on_close:(fun _ _ -> Miaou.Core.Help_hint.clear ())
+    ~cancel_on:[]
+    ~on_close:(fun state _reason ->
+      (* Apply current selections even when closing with Esc to keep extra args in sync. *)
+      let tokens = state.rows |> Array.to_list |> format_tokens in
+      on_apply tokens ;
+      Miaou.Core.Help_hint.clear ())
 
 (* Options to exclude from the node flags modal:
    - Meta options (--help, --version)
@@ -790,12 +885,12 @@ let name_matches_excluded name excluded =
   || String.length name >= String.length excluded
      && String.sub name 0 (String.length excluded) = excluded
 
-let is_excluded_option opt =
+let is_excluded_option opt ~excluded =
   (* Check if any of the option's names starts with an excluded prefix *)
   List.exists
     (fun excluded ->
       List.exists (fun name -> name_matches_excluded name excluded) opt.names)
-    excluded_node_options
+    excluded
 
 let open_node_run_help ~app_bin_dir ~on_apply =
   let app_bin_dir = String.trim app_bin_dir in
@@ -806,13 +901,123 @@ let open_node_run_help ~app_bin_dir ~on_apply =
     match load_options ~binary with
     | Ok options ->
         let filtered =
-          List.filter (fun opt -> not (is_excluded_option opt)) options
+          List.filter
+            (fun opt ->
+              not (is_excluded_option opt ~excluded:excluded_node_options))
+            options
         in
         open_modal ~title:"Node Flags" ~options:filtered ~on_apply
     | Error (`Msg msg) -> Modal_helpers.show_error ~title:"Node Flags" msg
 
+let excluded_baker_options =
+  [
+    "--help";
+    "-help";
+    "--version";
+    "--base-dir";
+    "--endpoint";
+    "--delegate";
+    "--dal-node";
+    "--log-file";
+    "--chain";
+  ]
+
+type baker_mode = [`Local | `Remote]
+
+let load_baker_options ~binary ~mode =
+  let cache_key =
+    Printf.sprintf
+      "%s:baker:%s"
+      binary
+      (match mode with `Local -> "local" | `Remote -> "remote")
+  in
+  match Hashtbl.find_opt cache cache_key with
+  | Some opts -> Ok opts
+  | None ->
+      let try_cmd label cmd =
+        match run_help_cmd binary cmd with
+        | Error (`Msg msg) -> Error (`Msg (Printf.sprintf "%s: %s" label msg))
+        | Ok output ->
+            let opts = parse_help_baker (strip_ansi output) in
+            if opts = [] then
+              Error
+                (`Msg
+                   (Printf.sprintf
+                      "%s: no options parsed from help output"
+                      label))
+            else Ok opts
+      in
+      let candidates =
+        match mode with
+        | `Local ->
+            [
+              ("local", ["run"; "with"; "local"; "node"; "/dev/null"; "--help"]);
+              ( "remote-fallback",
+                [
+                  "run";
+                  "with";
+                  "remote";
+                  "node";
+                  "http://127.0.0.1:8732";
+                  "--help";
+                ] );
+              ("help", ["--help"]);
+              ("run-help", ["run"; "--help"]);
+            ]
+        | `Remote ->
+            [
+              ( "remote",
+                [
+                  "run";
+                  "with";
+                  "remote";
+                  "node";
+                  "http://127.0.0.1:8732";
+                  "--help";
+                ] );
+              ("help", ["--help"]);
+              ("run-help", ["run"; "--help"]);
+              ( "local-fallback",
+                ["run"; "with"; "local"; "node"; "/dev/null"; "--help"] );
+            ]
+      in
+      let rec loop errs = function
+        | [] -> Error (`Msg (String.concat " | " (List.rev errs)))
+        | (label, cmd) :: rest -> (
+            match try_cmd label cmd with
+            | Ok opts -> Ok opts
+            | Error (`Msg m) -> loop (m :: errs) rest)
+      in
+      let* opts = loop [] candidates in
+      Hashtbl.replace cache cache_key opts ;
+      Ok opts
+
+let open_baker_run_help ~app_bin_dir ~mode ~on_apply =
+  let app_bin_dir = String.trim app_bin_dir in
+  let title =
+    match mode with
+    | `Local -> "Baker Flags · Local Node"
+    | `Remote -> "Baker Flags · Remote Node"
+  in
+  if app_bin_dir = "" then
+    Modal_helpers.show_error ~title "Octez bin directory is empty"
+  else
+    let binary = Filename.concat app_bin_dir "octez-baker" in
+    match load_baker_options ~binary ~mode with
+    | Ok options ->
+        let filtered =
+          List.filter
+            (fun opt ->
+              not (is_excluded_option opt ~excluded:excluded_baker_options))
+            options
+        in
+        open_modal ~title ~options:filtered ~on_apply
+    | Error (`Msg msg) -> Modal_helpers.show_error ~title msg
+
 module For_tests = struct
-  let parse_help = parse_help
+  let parse_help = parse_help_node
+
+  let parse_baker_help = parse_help_baker
 
   let arg_kind_to_string = function
     | Toggle -> "toggle"
