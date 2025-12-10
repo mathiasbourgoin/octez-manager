@@ -1241,7 +1241,7 @@ let make_absolute_path_relative_current () =
               Alcotest.(check bool)
                 "is absolute"
                 true
-                (Filename.is_implicit path = false) ;
+                (not (Filename.is_relative path)) ;
               Alcotest.(check bool)
                 "contains testdir"
                 true
@@ -1262,7 +1262,7 @@ let make_absolute_path_with_parent () =
               Alcotest.(check bool)
                 "is absolute"
                 true
-                (Filename.is_implicit path = false) ;
+                (not (Filename.is_relative path)) ;
               (* The resolved path should be the base directory *)
               Alcotest.(check string) "resolved to base" base path
           | Error (`Msg msg) -> Alcotest.failf "../ path failed: %s" msg))
