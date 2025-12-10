@@ -1,8 +1,19 @@
-.PHONY: build test clean coverage
+.PHONY: deps deps-ci build test clean coverage
 
 OPAM_EXEC ?= opam exec --
 DUNE = $(OPAM_EXEC) dune
 BISECT = $(OPAM_EXEC) bisect-ppx-report
+
+deps:
+	opam update -y
+	opam install --deps-only --with-test -y .
+
+deps-ci:
+	@if [ -n "$$MIAOU_GIT_URL" ]; then \
+		opam pin add --yes miaou "$$MIAOU_GIT_URL"; \
+	fi
+	opam update -y
+	opam install --deps-only --with-test -y .
 
 build:
 	$(DUNE) build

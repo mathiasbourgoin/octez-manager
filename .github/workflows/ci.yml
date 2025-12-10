@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    env:
+      OPAMYES: "true"
+      MIAOU_GIT_URL: ${{ secrets.MIAOU_GIT_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.1.1
+          opam-depext: true
+          cache: true
+          opam-repositories: |
+            default: https://opam.ocaml.org
+
+      - name: Ensure Miaou pin secret
+        if: ${{ env.MIAOU_GIT_URL == '' }}
+        run: |
+          echo "MIAOU_GIT_URL is not set. Configure it to point to the private miaou repository for CI." >&2
+          exit 1
+
+      - name: Install dependencies
+        run: make deps-ci
+
+      - name: Build
+        run: opam exec -- make build
+
+      - name: Test
+        run: opam exec -- make test
