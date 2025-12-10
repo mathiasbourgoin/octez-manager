@@ -6,14 +6,14 @@ BISECT = $(OPAM_EXEC) bisect-ppx-report
 
 deps:
 	opam update -y
-	opam install --deps-only --with-test -y .
+	opam install --deps-only --with-test --reuse-build -y .
 
 deps-ci:
 	@if [ -n "$$MIAOU_GIT_URL" ]; then \
 		opam pin add --yes miaou "$$MIAOU_GIT_URL"; \
 	fi
 	opam update -y
-	opam install --deps-only --with-test -y .
+	opam install --deps-only --with-test --reuse-build -y .
 
 build:
 	$(DUNE) build

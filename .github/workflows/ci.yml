@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +25,7 @@ jobs:
     env:
       OPAMYES: "true"
       MIAOU_GIT_URL: ${{ secrets.MIAOU_GIT_URL }}
+      DUNE_CACHE: "enabled"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +38,22 @@ jobs:
           cache: true
           opam-repositories: |
             default: https://opam.ocaml.org
+
+      - name: Cache dune
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dune
+          key: ${{ runner.os }}-dune-${{ hashFiles('dune-project', 'Makefile', 'octez-manager.opam', '**/dune') }}
+          restore-keys: |
+            ${{ runner.os }}-dune-
+
+      - name: Cache opam download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/opam
+          key: ${{ runner.os }}-opam-cache-${{ hashFiles('octez-manager.opam', '**/*.opam') }}
+          restore-keys: |
+            ${{ runner.os }}-opam-cache-
 
       - name: Ensure Miaou pin secret
         if: ${{ env.MIAOU_GIT_URL == '' }}
