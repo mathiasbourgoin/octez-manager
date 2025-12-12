@@ -492,8 +492,11 @@ let ensure_user_logrotate_timer ~owner ~group ~logrotate_bin =
 let disable_user_logrotate_timer () =
   let timer = user_logrotate_unit ^ ".timer" in
   let service = user_logrotate_unit ^ ".service" in
-  ignore (run_systemctl ["disable"; "--now"; timer]) ;
-  ignore (run_systemctl ["disable"; "--now"; service]) ;
+  (* Only attempt to disable units if their files exist to avoid spurious errors *)
+  if Sys.file_exists (user_logrotate_timer_path ()) then
+    ignore (run_systemctl ["disable"; "--now"; timer]) ;
+  if Sys.file_exists (user_logrotate_service_path ()) then
+    ignore (run_systemctl ["disable"; "--now"; service]) ;
   ignore (run_systemctl_timeout ["daemon-reload"]) ;
   ()
 
@@ -693,8 +696,8 @@ let install_refresh_timer ~instance ~frequency ~cmd ~user =
 
 let remove_refresh_timer ~instance =
   let service_name = refresh_unit_name instance in
-  let timer_name = service_name ^ ".timer" in
-  let _ = run_systemctl ["disable"; "--now"; timer_name] in
+  let timer_unit = service_name ^ ".timer" in
+  let service_unit = service_name ^ ".service" in
   let service_path =
     if Common.is_root () then
       Printf.sprintf "/etc/systemd/system/%s.service" service_name
@@ -711,6 +714,11 @@ let remove_refresh_timer ~instance =
         (Filename.concat (Common.xdg_config_home ()) "systemd/user")
         (service_name ^ ".timer")
   in
+  (* Only attempt to disable units if their files exist to avoid spurious errors *)
+  if Sys.file_exists timer_path then
+    ignore (run_systemctl ["disable"; "--now"; timer_unit]) ;
+  if Sys.file_exists service_path then
+    ignore (run_systemctl ["disable"; "--now"; service_unit]) ;
   Common.remove_path service_path ;
   Common.remove_path timer_path ;
   let _ = run_systemctl_timeout ["daemon-reload"] in
@@ -735,4 +743,6 @@ module For_tests = struct
       ()
 
   let render_logging_lines = render_logging_lines
+
+  let disable_user_logrotate_timer = disable_user_logrotate_timer
 end
