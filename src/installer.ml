@@ -879,11 +879,12 @@ let install_baker (request : baker_request) =
     | Some dir when String.trim dir <> "" -> Some (String.trim dir)
     | _ -> None
   in
-  let data_dir_for_service =
-    match node_data_dir_opt with
-    | Some dir -> dir
-    | None -> Common.default_role_dir "baker" request.instance ^ "/remote-node"
+  let base_dir =
+    match request.base_dir with
+    | Some dir when String.trim dir <> "" -> dir
+    | _ -> Common.default_data_dir request.instance
   in
+  let data_dir_for_service = base_dir in
   let history_mode =
     match node_service_opt with
     | Some svc -> svc.Service.history_mode
@@ -901,11 +902,6 @@ let install_baker (request : baker_request) =
     match node_service_opt with
     | Some svc -> Ok svc.Service.network
     | None -> Teztnets.resolve_octez_node_chain ~endpoint:node_endpoint
-  in
-  let base_dir =
-    match request.base_dir with
-    | Some dir when String.trim dir <> "" -> dir
-    | _ -> Common.default_role_dir "baker" request.instance
   in
   let dal_config =
     match request.dal_config with

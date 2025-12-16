@@ -214,7 +214,7 @@ let ensure_service_user_initialized () =
 
 let ensure_base_dir_initialized () =
   let current = !form_ref in
-  let default_dir = Common.default_role_dir "baker" current.instance_name in
+  let default_dir = Common.default_data_dir current.instance_name in
   if String.trim current.base_dir = "" then
     update_form_ref (fun f -> {f with base_dir = default_dir})
 
@@ -366,11 +366,11 @@ let open_binary_help s =
 
 let update_instance_name new_name =
   let old = !form_ref.instance_name in
-  let default_dir = Common.default_role_dir "baker" new_name in
+  let default_dir = Common.default_data_dir new_name in
   update_form_ref (fun f ->
       let keep_base_dir =
         String.trim f.base_dir <> ""
-        && not (String.equal f.base_dir (Common.default_role_dir "baker" old))
+        && not (String.equal f.base_dir (Common.default_data_dir old))
       in
       {
         f with
@@ -450,7 +450,7 @@ let edit_field s =
                 {f with parent_node = svc.Service.instance}) ;
             if should_autoname then
               update_instance_name
-                (Printf.sprintf "baker-%s" svc.Service.instance) ;
+                (Printf.sprintf "%s-baker" svc.Service.instance) ;
             maybe_use_app_bin_dir svc.Service.app_bin_dir
       in
       open_choice_modal ~title:"Parent Node" ~items ~to_string ~on_select ;
@@ -726,7 +726,7 @@ let edit_field s =
         in
         let base_dir =
           let trimmed = String.trim f.base_dir in
-          if trimmed = "" then Common.default_role_dir "baker" instance
+          if trimmed = "" then Common.default_data_dir instance
           else trimmed
         in
         let req =

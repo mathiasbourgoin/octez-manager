@@ -95,7 +95,7 @@ let create_baker_flow ~services ~on_success =
       ~on_select:(fun parent_node ->
         prompt_text_modal
           ~title:"Baker Instance Name"
-          ~initial:("baker-" ^ parent_node)
+          ~initial:(parent_node ^ "-baker")
           ~on_submit:(fun instance ->
             prompt_text_modal
               ~title:"Delegates (comma separated)"

@@ -435,7 +435,7 @@ let _view_logs_old state =
         in
         match List.assoc_opt "OCTEZ_BAKER_BASE_DIR" env with
         | Some v when String.trim v <> "" -> String.trim v
-        | _ -> Common.default_role_dir "baker" svc.Service.instance
+        | _ -> Common.default_data_dir svc.Service.instance
       in
       let baker_daily_logs () =
         let dir = Filename.concat (baker_base_dir ()) "daily_logs" in
