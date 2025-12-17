@@ -884,6 +884,11 @@ let install_baker (request : baker_request) =
     | Some dir when String.trim dir <> "" -> dir
     | _ -> Common.default_data_dir request.instance
   in
+  let data_dir_for_service =
+    match node_data_dir_opt with
+    | Some dir -> dir
+    | None -> base_dir
+  in
   let history_mode =
     match node_service_opt with
     | Some svc -> svc.Service.history_mode
@@ -940,7 +945,7 @@ let install_baker (request : baker_request) =
       instance = request.instance;
       network;
       history_mode;
-      data_dir = base_dir;
+      data_dir = data_dir_for_service;
       rpc_addr = node_endpoint;
       net_addr = "";
       service_user = request.service_user;
@@ -1098,7 +1103,29 @@ let purge_service ~instance =
   match svc_opt with
   | None -> R.error_msgf "Instance '%s' not found" instance
   | Some svc ->
-      let* () = remove_service ~delete_data_dir:true ~instance in
+      (* For bakers, we need to delete the base_dir (client config), not data_dir
+         (which may be shared with a node). Read base_dir from environment. *)
+      let* dir_to_delete =
+        if String.equal (String.lowercase_ascii svc.role) "baker" then
+          match Node_env.read ~inst:instance with
+          | Ok env -> (
+              match List.assoc_opt "OCTEZ_BAKER_BASE_DIR" env with
+              | Some base_dir when String.trim base_dir <> "" ->
+                  Ok (String.trim base_dir)
+              | _ -> 
+                  (* Fallback to default if not found in env *)
+                  Ok (Common.default_data_dir instance))
+          | Error _ -> 
+              (* If we can't read env, use default *)
+              Ok (Common.default_data_dir instance)
+        else Ok svc.data_dir
+      in
+      let* () = Systemd.disable ~role:svc.role ~instance ~stop_now:true in
+      Systemd.remove_dropin ~role:svc.role ~instance ;
+      let* () = Common.remove_tree dir_to_delete in
+      let* () = Service_registry.remove ~instance in
+      let* services = Service_registry.list () in
+      let* () = Systemd.sync_logrotate (logrotate_specs_of services) in
       let* () = remove_logging_artifacts svc.logging_mode in
       let* remaining = Service_registry.list () in
       if
