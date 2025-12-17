@@ -887,7 +887,7 @@ let install_baker (request : baker_request) =
   let data_dir_for_service =
     match node_data_dir_opt with
     | Some dir -> dir
-    | None -> base_dir
+    | None -> ""
   in
   let history_mode =
     match node_service_opt with

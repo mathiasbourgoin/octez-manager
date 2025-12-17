@@ -128,7 +128,7 @@ let view_details svc =
           ("Role", svc.Service.role);
           ("Network", svc.Service.network);
           ("History Mode", History_mode.to_string svc.Service.history_mode);
-          ("Baker Base Dir", if base_dir = "" then "(unset)" else base_dir);
+          ("Base Dir", if base_dir = "" then "(unset)" else base_dir);
           ("Delegates", delegates);
           ("Node Mode", if node_mode = "" then "remote" else node_mode);
           ( "Node Endpoint",
