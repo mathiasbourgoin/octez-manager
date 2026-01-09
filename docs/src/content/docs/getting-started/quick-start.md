@@ -5,73 +5,118 @@ description: Get a Tezos node running in 5 minutes
 
 # Quick Start
 
-Get a Tezos node running in 5 minutes using the interactive TUI.
+Get a Tezos node running in 5 minutes.
 
-## Launch the TUI
+## Option 1: Interactive TUI
+
+Launch the TUI:
 
 ```bash
 octez-manager
 ```
 
-You'll see the main dashboard showing your instances (initially empty).
+You'll see the main dashboard:
 
-## Install a Node
-
-1. Press `i` to open the install menu
-2. Select **Node** from the list
-3. Fill in the form:
-   - **Instance name**: `my-node` (or any name you prefer)
-   - **Network**: Select `mainnet` or `ghostnet`
-   - **History mode**: `rolling` (recommended) or `full`
-   - **Bootstrap**: `Snapshot` (faster) or `Genesis` (from scratch)
-
-4. Press `Enter` to submit
-
-The installer will:
-- Create the data directory
-- Download and import a snapshot (if selected)
-- Configure the systemd service
-- Start the node
-
-## Monitor Your Node
-
-Once installed, your node appears on the dashboard. You can:
-
-- Press `Enter` on the instance to see details
-- Press `l` to view logs
-- Press `s` to start/stop the service
-
-## CLI Alternative
-
-You can also install via CLI:
-
-```bash
-# Interactive mode
-octez-manager install-node
-
-# With flags
-octez-manager install-node \
-  --instance my-node \
-  --network mainnet \
-  --history-mode rolling \
-  --bootstrap snapshot
+```
+┌─ Instances ──────────────────────────────────────────────────────────┐
+│                                                                      │
+│  No instances configured yet.                                        │
+│                                                                      │
+│  Press 'i' to install a new instance.                                │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+ i: install  q: quit  ?: help
 ```
 
-## Keyboard Shortcuts
+Press `i`, select **Node**, and follow the prompts.
 
-| Key | Action |
-|-----|--------|
-| `i` | Install new instance |
-| `Enter` | View instance details |
-| `l` | View logs |
-| `s` | Start/stop service |
-| `r` | Restart service |
-| `d` | Delete instance |
-| `q` | Quit |
-| `?` | Help |
+After installation, your dashboard shows:
 
-## Next Steps
+```
+┌─ Instances ──────────────────────────────────────────────────────────┐
+│                                                                      │
+│  ● mainnet          node     running     mainnet     rolling         │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+ i: install  s: start/stop  l: logs  Enter: details  q: quit
+```
 
-- [Detailed Node Setup Guide](/octez-manager/guides/node-setup)
-- [Becoming a Baker](/octez-manager/guides/baker-setup)
-- [TUI Guide](/octez-manager/guides/tui-guide)
+---
+
+## Option 2: CLI one-liner
+
+Deploy a mainnet node with snapshot:
+
+```bash
+octez-manager install-node \
+  --instance mainnet \
+  --network mainnet \
+  --history-mode rolling \
+  --bootstrap snapshot \
+  --yes
+```
+
+Check status:
+
+```bash
+octez-manager list
+```
+
+Output:
+
+```
+INSTANCE    ROLE    STATUS     NETWORK    MODE
+mainnet     node    running    mainnet    rolling
+```
+
+---
+
+## View logs
+
+**TUI:** Select instance, press `l`
+
+```
+┌─ Logs: mainnet ─────────────────────────────────────────────────────┐
+│ Source: journald  r: refresh  t: toggle  /: search  Esc: back       │
+├─────────────────────────────────────────────────────────────────────┤
+│ Jan 09 12:00:01 validator: applied block BLbc4...                   │
+│ Jan 09 12:00:02 p2p: 48 active connections                          │
+│ Jan 09 12:00:03 chain: head is now at level 7234521                 │
+│ Jan 09 12:00:04 mempool: 15 pending operations                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**CLI:**
+
+```bash
+octez-manager instance mainnet logs
+```
+
+---
+
+## Service control
+
+```bash
+# Stop
+octez-manager instance mainnet stop
+
+# Start
+octez-manager instance mainnet start
+
+# Restart
+octez-manager instance mainnet restart
+
+# Remove (keeps data)
+octez-manager instance mainnet remove
+
+# Purge (removes data)
+octez-manager instance mainnet purge
+```
+
+---
+
+## Next steps
+
+- [Setting up a baker](/octez-manager/guides/baker-setup/)
+- [TUI keyboard shortcuts](/octez-manager/guides/tui-guide/)
+- [CLI reference](/octez-manager/reference/cli/)

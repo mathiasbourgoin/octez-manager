@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background hexagon inspired by Tezos -->
+  <path d="M60 5 L110 32.5 L110 87.5 L60 115 L10 87.5 L10 32.5 Z"
+        fill="#0D61FF" opacity="0.1"/>
+  <path d="M60 15 L100 37.5 L100 82.5 L60 105 L20 82.5 L20 37.5 Z"
+        stroke="#0D61FF" stroke-width="2" fill="none"/>
+
+  <!-- Terminal window -->
+  <rect x="30" y="35" width="60" height="45" rx="4" fill="#1a1a2e" stroke="#0D61FF" stroke-width="1.5"/>
+
+  <!-- Terminal header dots -->
+  <circle cx="38" cy="42" r="2.5" fill="#ff5f56"/>
+  <circle cx="46" cy="42" r="2.5" fill="#ffbd2e"/>
+  <circle cx="54" cy="42" r="2.5" fill="#27ca40"/>
+
+  <!-- Terminal content - stylized "OM" -->
+  <text x="42" y="68" font-family="monospace" font-size="18" font-weight="bold" fill="#0D61FF">OM</text>
+
+  <!-- Cursor blink -->
+  <rect x="72" y="56" width="8" height="14" fill="#0D61FF" opacity="0.8"/>
+</svg>

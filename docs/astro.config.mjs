@@ -9,7 +9,10 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Octez Manager',
-			description: 'A CLI and TUI tool for managing Tezos nodes, bakers, accusers, and DAL nodes',
+			logo: {
+				src: './public/logo.svg',
+			},
+			description: 'CLI and TUI for managing Tezos nodes, bakers, and DAL infrastructure',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/mathiasbourgoin/octez-manager' },
 			],
@@ -37,6 +40,15 @@ export default defineConfig({
 				},
 			],
 			customCss: ['./src/styles/custom.css'],
+			head: [
+				{
+					tag: 'meta',
+					attrs: {
+						name: 'theme-color',
+						content: '#0D61FF',
+					},
+				},
+			],
 		}),
 	],
 });
