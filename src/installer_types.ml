@@ -39,6 +39,7 @@ type node_request = {
   bootstrap : bootstrap;
   preserve_data : bool;
   snapshot_no_check : bool;
+  tmp_dir : string option;
 }
 
 type daemon_request = {

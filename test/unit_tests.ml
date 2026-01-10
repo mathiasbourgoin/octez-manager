@@ -176,6 +176,7 @@ let sample_node_request ?data_dir ?(bootstrap = Genesis)
     bootstrap;
     preserve_data;
     snapshot_no_check;
+    tmp_dir = None;
   }
 
 let service_make_populates_fields () =

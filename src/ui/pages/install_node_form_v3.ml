@@ -595,6 +595,8 @@ let spec =
             bootstrap;
             preserve_data = model.preserve_data = `Keep;
             snapshot_no_check = false;
+            tmp_dir = None;
+            (* TODO: Add UI for tmp_dir selection *)
           }
         in
 

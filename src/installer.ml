@@ -143,8 +143,16 @@ type snapshot_progress = {
   on_download_progress : (int -> int option -> unit) option;
 }
 
-let download_snapshot_to_tmp ?(quiet = false) ?progress src =
-  let tmp = Filename.temp_file "octez-manager.snapshot" ".snap" in
+let download_snapshot ?(quiet = false) ?progress ?tmp_dir src =
+  let tmp =
+    match tmp_dir with
+    | Some dir ->
+        let name =
+          Printf.sprintf "octez-manager.snapshot.%d.snap" (Unix.getpid ())
+        in
+        Filename.concat dir name
+    | None -> Filename.temp_file "octez-manager.snapshot" ".snap"
+  in
   let res =
     match progress with
     | Some {on_download_progress} ->
@@ -163,7 +171,7 @@ let download_snapshot_to_tmp ?(quiet = false) ?progress src =
       Common.remove_path tmp ;
       e
 
-let prepare_snapshot_source ?(quiet = false) ?progress src =
+let prepare_snapshot_source ?(quiet = false) ?progress ?tmp_dir src =
   let trimmed = String.trim src in
   if trimmed = "" then R.error_msg "Snapshot URI is empty"
   else
@@ -172,7 +180,7 @@ let prepare_snapshot_source ?(quiet = false) ?progress src =
     | None when not (is_http_url trimmed) ->
         if Sys.file_exists trimmed then Ok {path = trimmed; cleanup = false}
         else R.error_msgf "Snapshot file %s does not exist" trimmed
-    | _ -> download_snapshot_to_tmp ~quiet ?progress trimmed
+    | _ -> download_snapshot ~quiet ?progress ?tmp_dir trimmed
 
 let snapshot_plan_of_request request =
   match request.bootstrap with
@@ -234,12 +242,12 @@ let import_snapshot_file ?(quiet = false) ?on_log ~app_bin_dir ~data_dir
     ~no_check
     ()
 
-let perform_snapshot_plan ?(quiet = false) ?on_log ~plan ~app_bin_dir ~data_dir
-    ~no_check () =
+let perform_snapshot_plan ?(quiet = false) ?on_log ?tmp_dir ~plan ~app_bin_dir
+    ~data_dir ~no_check () =
   match plan with
   | No_snapshot -> Ok ()
   | Direct_snapshot {uri} ->
-      let* snapshot_file = prepare_snapshot_source ~quiet uri in
+      let* snapshot_file = prepare_snapshot_source ~quiet ?tmp_dir uri in
       Fun.protect
         ~finally:(fun () ->
           if snapshot_file.cleanup then Common.remove_path snapshot_file.path)
@@ -253,7 +261,7 @@ let perform_snapshot_plan ?(quiet = false) ?on_log ~plan ~app_bin_dir ~data_dir
             ~no_check
             ())
   | Tzinit_snapshot res ->
-      let* snapshot_file = download_snapshot_to_tmp ~quiet res.download_url in
+      let* snapshot_file = download_snapshot ~quiet ?tmp_dir res.download_url in
       Fun.protect
         ~finally:(fun () ->
           if snapshot_file.cleanup then Common.remove_path snapshot_file.path)
@@ -267,11 +275,12 @@ let perform_snapshot_plan ?(quiet = false) ?on_log ~plan ~app_bin_dir ~data_dir
             ~no_check
             ())
 
-let perform_bootstrap ?(quiet = false) ?on_log ~plan ~(request : node_request)
-    ~data_dir () =
+let perform_bootstrap ?(quiet = false) ?on_log ?tmp_dir ~plan
+    ~(request : node_request) ~data_dir () =
   perform_snapshot_plan
     ~quiet
     ?on_log
+    ?tmp_dir
     ~plan
     ~app_bin_dir:request.app_bin_dir
     ~data_dir
@@ -606,7 +615,14 @@ let install_node ?(quiet = false) ?on_log (request : node_request) =
       log "Skipping bootstrap (preserve_data=true)\n" ;
       Ok ())
     else
-      perform_bootstrap ~quiet ?on_log ~plan:snapshot_plan ~request ~data_dir ()
+      perform_bootstrap
+        ~quiet
+        ?on_log
+        ?tmp_dir:request.tmp_dir
+        ~plan:snapshot_plan
+        ~request
+        ~data_dir
+        ()
   in
   log "Reowning runtime paths...\n" ;
   let* () = reown_runtime_paths ~owner ~group ~paths:[data_dir] ~logging_mode in
