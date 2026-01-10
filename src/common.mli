@@ -97,3 +97,9 @@ val remove_tree : string -> (unit, [> `Msg of string]) result
 val copy_file : string -> string -> (unit, [> `Msg of string]) result
 
 val is_port_in_use : int -> bool
+
+(** Get the size of a remote file via HTTP HEAD request. Returns None on error. *)
+val get_remote_file_size : string -> int64 option
+
+(** Get available disk space in a directory in bytes. Returns None on error. *)
+val get_available_space : string -> int64 option

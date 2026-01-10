@@ -40,6 +40,7 @@ type model = {
   (* Node-specific fields *)
   snapshot : snapshot_selection;
   preserve_data : preserve_data;
+  tmp_dir : string option; (* Custom directory for snapshot download *)
   (* Edit mode *)
   edit_mode : bool;
   original_instance : string option;
@@ -69,6 +70,7 @@ let base_initial_model () =
       };
     snapshot = `None;
     preserve_data = `Auto;
+    tmp_dir = None;
     edit_mode = false;
     original_instance = None;
     stopped_dependents = [];
@@ -293,6 +295,7 @@ let make_initial_model () =
         snapshot = `None;
         preserve_data = `Keep;
         (* Always preserve data in edit mode *)
+        tmp_dir = None;
         edit_mode = true;
         original_instance = Some svc.Service.instance;
         stopped_dependents = edit_ctx.stopped_dependents;
@@ -423,6 +426,37 @@ let snapshot_field =
         | _ -> None)
     ()
 
+let tmp_dir_field =
+  Form_builder.custom
+    ~label:"Download Directory"
+    ~get:(fun m ->
+      match m.tmp_dir with None -> "/tmp (default)" | Some dir -> dir)
+    ~edit:(fun model_ref ->
+      Modal_helpers.prompt_text_modal
+        ~title:"Snapshot Download Directory"
+        ~placeholder:(Some "/var/tmp")
+        ~initial:(Option.value ~default:"" !model_ref.tmp_dir)
+        ~on_submit:(fun dir ->
+          let dir = String.trim dir in
+          model_ref :=
+            {!model_ref with tmp_dir = (if dir = "" then None else Some dir)})
+        ())
+    ~validate:(fun m ->
+      match m.tmp_dir with
+      | None -> true
+      | Some dir ->
+          String.trim dir <> ""
+          && ((not (Sys.file_exists dir)) || Sys.is_directory dir))
+    ~validate_msg:(fun m ->
+      match m.tmp_dir with
+      | None -> None
+      | Some dir ->
+          if String.trim dir = "" then Some "Directory path cannot be empty"
+          else if Sys.file_exists dir && not (Sys.is_directory dir) then
+            Some "Path exists but is not a directory"
+          else None)
+    ()
+
 (** {1 Form Specification} *)
 
 let spec =
@@ -490,6 +524,15 @@ let spec =
                |> with_hint
                     "Import a snapshot for faster sync. None = sync from \
                      genesis (slow).";
+             ])
+        (* Download directory field, only shown when snapshot is selected *)
+        @ (if model.edit_mode || model.snapshot = `None then []
+           else
+             [
+               tmp_dir_field
+               |> with_hint
+                    "Custom directory for large snapshot downloads. Use if \
+                     /tmp has insufficient space.";
              ])
         @ core_service_fields
             ~get_core:(fun m -> m.core)
@@ -595,6 +638,7 @@ let spec =
             bootstrap;
             preserve_data = model.preserve_data = `Keep;
             snapshot_no_check = false;
+            tmp_dir = model.tmp_dir;
           }
         in
 
